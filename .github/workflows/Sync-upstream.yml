@@ -1,0 +1,113 @@
+
+name: Sync upstream
+
+on:
+#  push:
+#    paths:
+#      - '.github/workflows/Sync-upstream.yml'
+#      - 'diy/**'
+  schedule:
+    - cron: 30 5 * * *
+  watch:
+    types: started
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'false'
+
+env:
+  DIY_my_SH: sh/ax6_imm_diy-part2.sh        
+
+jobs:
+  build:
+    if: github.event.repository.owner.id == github.event.sender.id || ! github.event.sender.id
+    runs-on: Ubuntu-24.04
+
+    name: 更新 ${{matrix.target}}
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [main]
+
+    steps:
+    - name: 检出
+      uses: actions/checkout@main
+      with:
+        fetch-depth: 0
+
+    - name: 初始化环境
+      run : |
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        sudo timedatectl set-timezone "Asia/Shanghai"
+        
+    - name: 克隆上级文件
+      run: |
+        cd $GITHUB_WORKSPACE
+        git clone -b ${{matrix.target}} https://github.com/fichenx/Actions-OpenWrt.git ${{matrix.target}}
+        cd ${{matrix.target}}
+        #git rm -r --cache * >/dev/null 2>&1 &
+        #rm -rf `find ./* -maxdepth 0 -type d ! -name "diy"` >/dev/null 2>&1
+        rm -rf patch/breakings_PATCH res/breakings_general sh/build.sh sh/breakings_diy-part2.sh wrt_core
+        git clone --depth 1 --filter=blob:none --no-checkout https://github.com/breakingbadboy/OpenWrt temp && cd temp && git checkout main -- general PATCH diy-part2.sh && cd .. &&\
+        mv -n temp/general res/breakings_general && \
+        mv -n temp/PATCH patch/breakings_PATCH && \
+        mv -n temp/diy-part2.sh sh/breakings_diy-part2.sh && \
+        rm -rf temp
+        git clone --depth 1 --filter=blob:none --no-checkout https://github.com/ZqinKing/wrt_release temp && cd temp && git checkout main -- wrt_core build.sh && cd .. &&\
+        mv -n temp/build.sh sh/ && \
+        mv -n temp/wrt_core ./ && \
+        cp -rf config/compilecfg wrt_core/ && \
+        cp -rf config/*.config wrt_core/deconfig/ && \
+        rm -rf temp
+    - name: 处理克隆的文件
+      run: |
+        cd $GITHUB_WORKSPACE/${{matrix.target}}
+        #处理build.sh 
+        sed -i -e 's|*rootfs.tar.gz|*.tar.gz|' \
+               -e 's|cat "$BASE_PATH/deconfig/proxy.config"|#cat "$BASE_PATH/deconfig/proxy.config"|' \
+               -e 's|cat "$BASE_PATH/deconfig/compile_base.config"|#cat "$BASE_PATH/config/compile_base.config"|' \
+               -e 's|cat "$BASE_PATH/deconfig/docker_deps.config"|#cat "$BASE_PATH/config/docker_deps.config"|' \
+               -e "/\$BASE_PATH\/update\.sh/a $GITHUB_WORKSPACE/$DIY_my_SH" \
+               -e '/make -j$(($(nproc) + 1)) || make -j1 V=s/a \\ncd $BASE_PATH/../$BUILD_DIR/bin/packages\ntar -zcvf Packages.tar.gz ./*\ncp Packages.tar.gz $BASE_PATH/../$BUILD_DIR/bin/targets/\ncd "$BASE_PATH/../$BUILD_DIR"' \
+               sh/build.sh
+        
+        #处理update.sh
+        sed -i -e 's/192.168.1.1/192.168.123.1/' \
+               -e 's/^[[:space:]]*update_lucky[[:space:]]*$/#&/' \
+               wrt_core/update.sh
+        #处理modules/*.sh
+        sed -i -e 's|kenzok8/small-package|fichenx/openwrt-package\;js|' \
+               -e 's|kenzok8/jell|fichenx/openwrt-package\;js|' \
+               -e 's|small-package|fichenx/openwrt-package|g' \
+               -e 's|small8_packages|fichenx_package|g' \
+               -e 's|small8|fichenx|g' \
+               -e 's|build by ZqinKing|build by FICHEN(\$(TZ=UTC-8 date +%Y.%m.%d))|' \
+               -e 's|^\(    \./scripts/feeds install -p fichenx -f \)|\1luci-app-argon-config luci-theme-design luci-app-design-config luci-app-watchcat-plus luci-app-wol luci-app-timecontrol \\\n        |' \
+               wrt_core/modules/*.sh
+        #处理breakings_diy-part2.sh
+        sed -i -e 's|$GITHUB_WORKSPACE/PATCH|$GITHUB_WORKSPACE/patch/breakings_PATCH|' \
+               -e 's|$GITHUB_WORKSPACE/general|$GITHUB_WORKSPACE/res/breakings_general|' \
+               sh/breakings_diy-part2.sh
+
+    - name: 上传更新文件
+      env: 
+        ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+      run: |
+        [ -e $GITHUB_WORKSPACE/LICENSE ] && cp $GITHUB_WORKSPACE/LICENSE $GITHUB_WORKSPACE/${{matrix.target}}
+        [ -e $GITHUB_WORKSPACE/README.md ] && cp $GITHUB_WORKSPACE/README.md $GITHUB_WORKSPACE/${{matrix.target}}
+        cd $GITHUB_WORKSPACE/${{matrix.target}}
+        git add .
+        git commit -am "update $(date +%Y-%m-%d" "%H:%M:%S)" || true
+        git push --quiet "https://${{ secrets.ACCESS_TOKEN }}@github.com/fichenx/Actions-OpenWrt.git" HEAD:${{matrix.target}}
+               
+    - name: 删除工作流
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 1
+        keep_minimum_runs: 3
+
+

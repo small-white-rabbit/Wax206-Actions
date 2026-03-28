@@ -1,0 +1,7 @@
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,2 +1,2 @@
+-project(n2n)
+-cmake_minimum_required(VERSION 2.6)
++cmake_minimum_required(VERSION 3.5)
++project(n2n)
