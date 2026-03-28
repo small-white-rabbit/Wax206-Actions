@@ -61,38 +61,58 @@ jobs:
       - name: 应用扩容方案
         if: inputs.model == 'fmwax206' || inputs.model == 'gwax206'
         run: |
-          cd action_build
+          echo "=== 仓库根目录结构检查 ==="
+          ls -la $GITHUB_WORKSPACE/ | grep -E 'dts|mediatek|wrt_core|action_build'
+          
+          echo "=== 检查源文件是否存在 ==="
+          ls -l $GITHUB_WORKSPACE/dts/wax206-*.dts || echo "❌ dts/ 目录下 wax206-*.dts 不存在！"
+          ls -l $GITHUB_WORKSPACE/mediatek/image/mt7622-*.mk || echo "❌ mediatek/image/ 目录下 mt7622-*.mk 不存在！"
+          
+          # 使用绝对路径，避免 cd 后变量问题
+          BUILD_DIR="$GITHUB_WORKSPACE/action_build"
+          
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "❌ action_build 目录不存在！请检查 pre_clone_action.sh 是否执行成功"
+            exit 1
+          fi
+          
+          echo "=== 进入 OpenWrt 源码目录 ==="
+          cd "$BUILD_DIR"
+          pwd
           
           case "${{ inputs.model }}" in
             fmwax206)
               echo "=== 应用 70M 扩容方案 ==="
-              # 1. 替换 DTS
-              cp $GITHUB_WORKSPACE/dts/wax206-70m.dts \
-                 target/linux/mediatek/dts/mt7622-netgear-wax206.dts
               
-              # 2. 直接替换 mt7622.mk
-              cp $GITHUB_WORKSPACE/mediatek/image/mt7622-70m.mk \
-                 target/linux/mediatek/image/mt7622.mk
+              cp -fv $GITHUB_WORKSPACE/dts/wax206-70m.dts \
+                     target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+              
+              cp -fv $GITHUB_WORKSPACE/mediatek/image/mt7622-70m.mk \
+                     target/linux/mediatek/image/mt7622.mk
               
               echo "VARIANT=70m" >> $GITHUB_ENV
               ;;
               
             gwax206)
               echo "=== 应用 256M 扩容方案 ==="
-              cp $GITHUB_WORKSPACE/dts/wax206-256m.dts \
-                 target/linux/mediatek/dts/mt7622-netgear-wax206.dts
               
-              cp $GITHUB_WORKSPACE/mediatek/image/mt7622-256m.mk \
-                 target/linux/mediatek/image/mt7622.mk
+              cp -fv $GITHUB_WORKSPACE/dts/wax206-256m.dts \
+                     target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+              
+              cp -fv $GITHUB_WORKSPACE/mediatek/image/mt7622-256m.mk \
+                     target/linux/mediatek/image/mt7622.mk
               
               echo "VARIANT=256m" >> $GITHUB_ENV
               ;;
           esac
           
-          echo "=== 验证修改 ==="
-          grep -E "(IMAGE_SIZE|KERNEL_SIZE)" target/linux/mediatek/image/mt7622.mk | grep -A1 -B1 "wax206" || true
-          grep "factory.img" target/linux/mediatek/image/mt7622.mk | head -3
-
+          echo "=== 替换结果验证 ==="
+          echo "DTS 文件大小：$(stat -c %s target/linux/mediatek/dts/mt7622-netgear-wax206.dts 2>/dev/null || echo '文件不存在')"
+          echo "MK 文件 IMAGE_SIZE："
+          grep -E "IMAGE_SIZE|KERNEL_SIZE|wax206" target/linux/mediatek/image/mt7622.mk || true
+          
+          echo "=== DTS 文件前15行（确认是否替换成功）==="
+          head -n 15 target/linux/mediatek/dts/mt7622-netgear-wax206.dts
       - name: 缓存依赖
         uses: actions/cache@v4
         with:
