@@ -19,7 +19,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  DIY_my_SH: sh/ax6_imm_diy-part2.sh
+  DIY_my_SH: diy-part2.sh
 
 jobs:
   build:
