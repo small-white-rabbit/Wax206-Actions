@@ -74,7 +74,20 @@ if [[ -d action_build ]]; then
 fi
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
-/home/runner/work/Actions-OpenWrt/Actions-OpenWrt/sh/ax6_imm_diy-part2.sh
+# ==================== 修改这里 ====================
+echo "=== 执行 diy-part2.sh（WAX206 专用）==="
+if [ -f "$BASE_PATH/../diy-part2.sh" ]; then
+    chmod +x "$BASE_PATH/../diy-part2.sh"
+    "$BASE_PATH/../diy-part2.sh" "$Dev" || echo "diy-part2.sh 执行完毕（当前可能为空）"
+else
+    echo "警告：diy-part2.sh 不存在，跳过自定义配置"
+fi
+
+# 如果你想暂时使用 sh/ 目录下的 ax6_imm_diy-part2.sh（不推荐长期使用）
+# 可以改成下面这行，但建议尽快替换成自己的版本：
+# chmod +x "$BASE_PATH/../sh/ax6_imm_diy-part2.sh"
+# "$BASE_PATH/../sh/ax6_imm_diy-part2.sh" "$Dev" || true
+# ==================================================
 
 apply_config
 remove_uhttpd_dependency
