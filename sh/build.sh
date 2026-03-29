@@ -118,7 +118,7 @@ replace_custom_files() {
     fi
 }
 # ==================================================
-replace_custom_files
+
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
 # ==================== 修改这里 ====================
@@ -135,7 +135,7 @@ fi
 # chmod +x "$BASE_PATH/../sh/ax6_imm_diy-part2.sh"
 # "$BASE_PATH/../sh/ax6_imm_diy-part2.sh" "$Dev" || true
 # ==================================================
-
+replace_custom_files
 apply_config
 remove_uhttpd_dependency
 
