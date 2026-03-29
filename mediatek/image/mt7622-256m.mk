@@ -65,7 +65,7 @@ define Device/netgear_wax206
   BLOCKSIZE := 128k
   PAGESIZE := 2048
   KERNEL_SIZE := 14436k
-  IMAGE_SIZE := 262144k        # ← 修改：256M
+  IMAGE_SIZE := 262144k
   KERNEL := kernel-bin | lzma | fit lzma $$(KDIR)/image-$$(firstword $$(DEVICE_DTS)).dtb | \
 	append-squashfs4-fakeroot
 # recovery can also be used with stock firmware web-ui, hence the padding...
