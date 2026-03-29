@@ -78,7 +78,7 @@ jobs:
       - name: 构建固件
         run: |
           chmod +x $DIY_my_SH
-          ./sh/build.sh wax206
+          ./sh/build.sh ${{ inputs.model || 'wax206'}}   # ← 修复这里
 
       - name: 获取内核版本
         run: |
