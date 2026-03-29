@@ -1,13 +1,9 @@
 #!/bin/bash
-#
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-# Description: OpenWrt DIY script part 2 (After Update feeds)
-#=================================================
 
-# 获取传入的设备参数
 Dev=$1
+echo "设备参数: $Dev"
 
-# 根据设备名确定构建目录
+# 根据 Dev 确定构建目录（与 pre_clone_action.sh 保持一致）
 case "$Dev" in
     "fmwax206")
         BUILD_DIR="fmwax206"
@@ -20,8 +16,18 @@ case "$Dev" in
         ;;
 esac
 
-# 切换到正确的构建目录（关键修复！）
-# 从 wrt_core 返回上级目录，再进入 BUILD_DIR
+echo "构建目录: $BUILD_DIR"
+
+# 检查目录是否存在
+if [ ! -d "../$BUILD_DIR" ]; then
+    echo "错误: 目录 ../$BUILD_DIR 不存在"
+    echo "当前目录: $(pwd)"
+    echo "上级目录内容:"
+    ls -la ../
+    exit 1
+fi
+
+# 进入构建目录
 cd "../$BUILD_DIR" || {
     echo "错误: 无法进入目录 ../$BUILD_DIR"
     exit 1
@@ -51,7 +57,7 @@ if [ -f "package/base-files/files/bin/config_generate" ]; then
     echo "✓ 已设置时区为 Asia/Shanghai"
 fi
 
-# 4. 配置WiFi（这部分不受影响，因为使用绝对路径 files/etc/config/）
+# 4. 配置WiFi
 mkdir -p files/etc/config/
 
 cat > files/etc/config/wireless <<'EOF'
@@ -92,5 +98,4 @@ config wifi-iface 'default_radio1'
 EOF
 
 echo "✓ 已配置WiFi默认设置"
-
 echo "DIY 配置完成！"
