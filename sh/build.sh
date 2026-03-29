@@ -125,7 +125,7 @@ replace_custom_files() {
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
 if [ -f "./diy-part2.sh" ]; then          # ← 改回 ../
     chmod +x "./diy-part2.sh"             # ← 改回 ../
-    "./diy-part2.sh" "$Dev" || echo "diy-part2.sh 执行完毕（当前可能为空）"
+    "./diy-part2.sh" "$Dev" && echo "diy-part2.sh 执行成功"  # 成功时提示
 else
     echo "警告：diy-part2.sh 不存在，跳过自定义配置"
 fi
