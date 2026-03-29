@@ -73,6 +73,53 @@ if [[ -d action_build ]]; then
     BUILD_DIR="action_build"
 fi
 
+# ==================== 新增：替换自定义 DTS/MK 文件 ====================
+replace_custom_files() {
+    local dts_src dts_dst mk_src mk_dst
+    
+    # 定义目标路径（OpenWrt 源码中的默认位置）
+    dts_dst="$BASE_PATH/../$BUILD_DIR/target/linux/mediatek/dts/mt7622-netgear-wax206.dts"
+    mk_dst="$BASE_PATH/../$BUILD_DIR/target/linux/mediatek/image/mt7622.mk"
+    
+    case "$Dev" in
+        "fmwax206")
+            echo "=== 应用 FMWAX206 自定义配置（70M 大分区）==="
+            dts_src="$BASE_PATH/dts/wax206-70m.dts"
+            mk_src="$BASE_PATH/mediatek/image/mt7622-70m.mk"
+            ;;
+        "gwax206")
+            echo "=== 应用 GWAX206 自定义配置（256M 大分区）==="
+            dts_src="$BASE_PATH/dts/wax206-256m.dts"
+            mk_src="$BASE_PATH/mediatek/image/mt7622-256m.mk"
+            ;;
+        "wax206")
+            echo "=== 使用 WAX206 默认配置（不进行替换）==="
+            return 0
+            ;;
+        *)
+            echo "=== 设备 $Dev 无需自定义 DTS/MK 替换 ==="
+            return 0
+            ;;
+    esac
+    
+    # 执行替换
+    if [[ -f "$dts_src" ]]; then
+        \cp -f "$dts_src" "$dts_dst"
+        echo "已替换 DTS: $dts_src -> $dts_dst"
+    else
+        echo "警告: DTS 源文件不存在: $dts_src"
+    fi
+    
+    if [[ -f "$mk_src" ]]; then
+        \cp -f "$mk_src" "$mk_dst"
+        echo "已替换 MK: $mk_src -> $mk_dst"
+    else
+        echo "警告: MK 源文件不存在: $mk_src"
+    fi
+}
+# ==================================================
+replace_custom_files
+
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
 # ==================== 修改这里 ====================
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
