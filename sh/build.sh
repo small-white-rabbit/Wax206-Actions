@@ -123,9 +123,9 @@ replace_custom_files() {
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
 # ==================== 修改这里 ====================
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
-if [ -f "$BASE_PATH/../diy-part2.sh" ]; then          # ← 改回 ../
-    chmod +x "$BASE_PATH/../diy-part2.sh"             # ← 改回 ../
-    "$BASE_PATH/../diy-part2.sh" "$Dev" || echo "diy-part2.sh 执行完毕（当前可能为空）"
+if [ -f "./diy-part2.sh" ]; then          # ← 改回 ../
+    chmod +x "./diy-part2.sh"             # ← 改回 ../
+    "./diy-part2.sh" "$Dev" || echo "diy-part2.sh 执行完毕（当前可能为空）"
 else
     echo "警告：diy-part2.sh 不存在，跳过自定义配置"
 fi
