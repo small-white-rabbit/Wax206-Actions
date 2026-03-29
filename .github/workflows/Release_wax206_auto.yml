@@ -61,58 +61,75 @@ jobs:
       - name: 应用扩容方案
         if: inputs.model == 'fmwax206' || inputs.model == 'gwax206'
         run: |
-          echo "=== 仓库根目录结构检查 ==="
-          ls -la $GITHUB_WORKSPACE/ | grep -E 'dts|mediatek|wrt_core|action_build'
+          set -x  # 显示每行执行的命令
+          set -e  # 出错立即退出
           
-          echo "=== 检查源文件是否存在 ==="
-          ls -l $GITHUB_WORKSPACE/dts/wax206-*.dts || echo "❌ dts/ 目录下 wax206-*.dts 不存在！"
-          ls -l $GITHUB_WORKSPACE/mediatek/image/mt7622-*.mk || echo "❌ mediatek/image/ 目录下 mt7622-*.mk 不存在！"
+          echo "=== 环境检查 ==="
+          echo "当前目录: $(pwd)"
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+          echo "输入型号: ${{ inputs.model }}"
           
-          # 使用绝对路径，避免 cd 后变量问题
-          BUILD_DIR="$GITHUB_WORKSPACE/action_build"
+          # 检查源文件
+          echo "=== 检查源文件 ==="
+          ls -la $GITHUB_WORKSPACE/dts/ || echo "dts目录不存在"
+          ls -la $GITHUB_WORKSPACE/mediatek/image/ || echo "mk目录不存在"
           
-          if [ ! -d "$BUILD_DIR" ]; then
-            echo "❌ action_build 目录不存在！请检查 pre_clone_action.sh 是否执行成功"
-            exit 1
-          fi
+          # 检查目标目录
+          echo "=== 检查目标目录 ==="
+          ls -la action_build/ || echo "action_build不存在"
           
-          echo "=== 进入 OpenWrt 源码目录 ==="
-          cd "$BUILD_DIR"
+          cd action_build
           pwd
           
-          case "${{ inputs.model }}" in
+          # 强制确认 case 匹配
+          echo "=== 开始 case 匹配 ==="
+          MODEL="${{ inputs.model }}"
+          echo "MODEL变量: $MODEL"
+          
+          case "$MODEL" in
             fmwax206)
-              echo "=== 应用 70M 扩容方案 ==="
+              echo ">>> 匹配到 fmwax206 <<<"
               
-              cp -fv $GITHUB_WORKSPACE/dts/wax206-70m.dts \
-                     target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+              # 强制检查并复制
+              if [ ! -f "$GITHUB_WORKSPACE/dts/wax206-70m.dts" ]; then
+                echo "错误：源文件不存在！"
+                ls -la $GITHUB_WORKSPACE/dts/
+                exit 1
+              fi
               
-              cp -fv $GITHUB_WORKSPACE/mediatek/image/mt7622-70m.mk \
-                     target/linux/mediatek/image/mt7622.mk
+              echo "复制 DTS..."
+              cp -fv "$GITHUB_WORKSPACE/dts/wax206-70m.dts" \
+                     "target/linux/mediatek/dts/mt7622-netgear-wax206.dts"
+              CP1=$?
+              echo "DTS复制返回值: $CP1"
+              
+              echo "复制 MK..."
+              cp -fv "$GITHUB_WORKSPACE/mediatek/image/mt7622-70m.mk" \
+                     "target/linux/mediatek/image/mt7622.mk"
+              CP2=$?
+              echo "MK复制返回值: $CP2"
               
               echo "VARIANT=70m" >> $GITHUB_ENV
               ;;
               
             gwax206)
-              echo "=== 应用 256M 扩容方案 ==="
-              
-              cp -fv $GITHUB_WORKSPACE/dts/wax206-256m.dts \
-                     target/linux/mediatek/dts/mt7622-netgear-wax206.dts
-              
-              cp -fv $GITHUB_WORKSPACE/mediatek/image/mt7622-256m.mk \
-                     target/linux/mediatek/image/mt7622.mk
-              
+              echo ">>> 匹配到 gwax206 <<<"
+              cp -fv "$GITHUB_WORKSPACE/dts/wax206-256m.dts" \
+                     "target/linux/mediatek/dts/mt7622-netgear-wax206.dts"
+              cp -fv "$GITHUB_WORKSPACE/mediatek/image/mt7622-256m.mk" \
+                     "target/linux/mediatek/image/mt7622.mk"
               echo "VARIANT=256m" >> $GITHUB_ENV
+              ;;
+              
+            *)
+              echo ">>> 未匹配到任何模式，MODEL=$MODEL <<<"
+              exit 1
               ;;
           esac
           
-          echo "=== 替换结果验证 ==="
-          echo "DTS 文件大小：$(stat -c %s target/linux/mediatek/dts/mt7622-netgear-wax206.dts 2>/dev/null || echo '文件不存在')"
-          echo "MK 文件 IMAGE_SIZE："
-          grep -E "IMAGE_SIZE|KERNEL_SIZE|wax206" target/linux/mediatek/image/mt7622.mk || true
-          
-          echo "=== DTS 文件前15行（确认是否替换成功）==="
-          head -n 15 target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+          echo "=== 验证 ==="
+          ls -la target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+          head -5 target/linux/mediatek/dts/mt7622-netgear-wax206.dts
       - name: 缓存依赖
         uses: actions/cache@v4
         with:
