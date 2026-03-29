@@ -1,34 +1,57 @@
 #!/bin/bash
 #
 # Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# File name: diy-part2.sh
 # Description: OpenWrt DIY script part 2 (After Update feeds)
-#
+#=================================================
 
-# Modify default IP
-#sed -i 's/192.168.1.1/192.168.50.5/g' package/base-files/files/bin/config_generate
-#!/bin/bash
-#=================================================
-# Description: DIY script for Wax206-Actions
-# 功能：设置默认IP、WiFi开启及功率调整
-#=================================================
+# 获取传入的设备参数
+Dev=$1
+
+# 根据设备名确定构建目录
+case "$Dev" in
+    "fmwax206")
+        BUILD_DIR="fmwax206"
+        ;;
+    "gwax206")
+        BUILD_DIR="gwax206"
+        ;;
+    "wax206"|*)
+        BUILD_DIR="wax206"
+        ;;
+esac
+
+# 切换到正确的构建目录（关键修复！）
+# 从 wrt_core 返回上级目录，再进入 BUILD_DIR
+cd "../$BUILD_DIR" || {
+    echo "错误: 无法进入目录 ../$BUILD_DIR"
+    exit 1
+}
+
+echo "当前工作目录: $(pwd)"
+echo "开始配置 $Dev ..."
 
 # 1. 设置默认IP为 192.168.31.1
-sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
+if [ -f "package/base-files/files/bin/config_generate" ]; then
+    sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
+    echo "✓ 已修改默认IP为 192.168.31.1"
+else
+    echo "✗ 警告: config_generate 不存在，跳过IP修改"
+fi
 
-# 2. 设置主机名（可选）
-sed -i 's/OpenWrt/Wax206/g' package/base-files/files/bin/config_generate
+# 2. 设置主机名
+if [ -f "package/base-files/files/bin/config_generate" ]; then
+    sed -i 's/OpenWrt/Wax206/g' package/base-files/files/bin/config_generate
+    echo "✓ 已修改主机名为 Wax206"
+fi
 
 # 3. 设置时区为上海
-sed -i "s/timezone='.*'/timezone='CST-8'/g" package/base-files/files/bin/config_generate
-sed -i "/timezone='CST-8'/a\\\t\tset system.@system[-1].zonename='Asia/Shanghai'" package/base-files/files/bin/config_generate
+if [ -f "package/base-files/files/bin/config_generate" ]; then
+    sed -i "s/timezone='.*'/timezone='CST-8'/g" package/base-files/files/bin/config_generate
+    sed -i "/timezone='CST-8'/a\\\t\tset system.@system[-1].zonename='Asia/Shanghai'" package/base-files/files/bin/config_generate
+    echo "✓ 已设置时区为 Asia/Shanghai"
+fi
 
-# 4. 配置WiFi默认开启、无密码、2.4G功率28dBm、国家代码US
+# 4. 配置WiFi（这部分不受影响，因为使用绝对路径 files/etc/config/）
 mkdir -p files/etc/config/
 
 cat > files/etc/config/wireless <<'EOF'
@@ -67,5 +90,7 @@ config wifi-iface 'default_radio1'
     option encryption 'none'
     option disabled '0'
 EOF
+
+echo "✓ 已配置WiFi默认设置"
 
 echo "DIY 配置完成！"
