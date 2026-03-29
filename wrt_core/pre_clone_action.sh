@@ -6,7 +6,6 @@ if [ -d "wrt_core" ]; then
 elif [ -d "../wrt_core" ]; then
     WRT_CORE_PATH="../wrt_core"
 else
-    # Fallback to script directory if wrt_core is current dir or relative
     WRT_CORE_PATH=$(dirname "$0")
 fi
 
@@ -29,21 +28,33 @@ read_ini_by_key() {
 REPO_URL=$(read_ini_by_key "REPO_URL")
 REPO_BRANCH=$(read_ini_by_key "REPO_BRANCH")
 REPO_BRANCH=${REPO_BRANCH:-main}
-# GitHub Actions usually runs in root of repo, so build dir should be relative to repo root
-# We need to construct absolute path or ensure context is correct.
-# Assuming this script is run from repo root or wrt_core.
-# Let's use relative path "action_build" next to wrt_core if possible or just use what works.
-# Original script used BASE_PATH/action_build.
-BUILD_DIR="$BASE_PATH/../action_build"
 
+# ========== 修复：使用 Dev 作为目录名 ==========
+# 如果 Dev 为空，默认使用 action_build
+if [ -z "$Dev" ]; then
+    BUILD_DIR_NAME="action_build"
+else
+    BUILD_DIR_NAME="$Dev"
+fi
+
+BUILD_DIR="$BASE_PATH/../$BUILD_DIR_NAME"
+# ===============================================
+
+echo "克隆到: $BUILD_DIR"
 echo $REPO_URL $REPO_BRANCH
-# Write flag one level up from wrt_core (repo root usually)
+
+# Write flag
 echo "$REPO_URL/$REPO_BRANCH" >"$BASE_PATH/../repo_flag"
+
+# 如果目录已存在，先删除
+if [ -d "$BUILD_DIR" ]; then
+    rm -rf "$BUILD_DIR"
+fi
+
 git clone --depth 1 -b $REPO_BRANCH $REPO_URL $BUILD_DIR
 
 # GitHub Action 移除国内下载源
 PROJECT_MIRRORS_FILE="$BUILD_DIR/scripts/projectsmirrors.json"
-
 if [ -f "$PROJECT_MIRRORS_FILE" ]; then
     sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
 fi
