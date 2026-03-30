@@ -1,4 +1,3 @@
-cat > diy-part2.sh << 'EOF'
 #!/bin/bash
 
 Dev=$1
@@ -16,7 +15,6 @@ echo "目标目录: $BUILD_DIR"
 
 if [ ! -d "./$BUILD_DIR" ]; then
     echo "错误: 目录 ./$BUILD_DIR 不存在"
-    echo "当前: $(pwd)"
     ls -la
     exit 1
 fi
@@ -86,6 +84,3 @@ echo "✓ WiFi配置完成"
 echo "=========================================="
 echo "DIY 配置完成！"
 echo "=========================================="
-EOF
-
-chmod +x diy-part2.sh
