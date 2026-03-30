@@ -151,13 +151,13 @@ jobs:
           case "$VARIANT" in
             fmwax206)
               for f in *netgear_wax206*; do
-                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-70m}"
+                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/70m-netgear_wax206}"
               done
               echo "已重命名为 70m 版本"
               ;;
             gwax206)
               for f in *netgear_wax206*; do
-                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-256m}"
+                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/256m-netgear_wax206}"
               done
               echo "已重命名为 256m 版本"
               ;;
