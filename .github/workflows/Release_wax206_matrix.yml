@@ -149,13 +149,13 @@ jobs:
           VARIANT="${{ matrix.variant }}"  # ← 修改：使用 matrix.variant 而不是 env.VARIANT
           
           case "$VARIANT" in
-            70m)
+            fmwax206)
               for f in *netgear_wax206*; do
                 [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-70m}"
               done
               echo "已重命名为 70m 版本"
               ;;
-            256m)
+            gwax206)
               for f in *netgear_wax206*; do
                 [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-256m}"
               done
