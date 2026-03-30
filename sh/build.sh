@@ -121,25 +121,23 @@ replace_custom_files() {
 
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
-# ==================== 执行 diy-part2.sh ====================
+# 第 90-102 行
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
 echo "当前工作目录: $(pwd)"
+echo "BUILD_DIR: $BUILD_DIR"          # ← 加调试
 
-# 直接用相对路径，因为 pwd 已经是在仓库根目录了
-DIY_SCRIPT="./diy-part2.sh"
-
-if [ -f "$DIY_SCRIPT" ]; then
-    chmod +x "$DIY_SCRIPT"
-    if bash "$DIY_SCRIPT" "$Dev"; then
+if [ -f "./diy-part2.sh" ]; then
+    chmod +x "./diy-part2.sh"
+    # 传入 Dev 和实际的 BUILD_DIR
+    if bash "./diy-part2.sh" "$Dev" "$BUILD_DIR"; then
         echo "diy-part2.sh 执行成功"
     else
         echo "错误：diy-part2.sh 执行失败，退出码: $?"
         exit 1
     fi
 else
-    echo "警告：diy-part2.sh 不存在于 $DIY_SCRIPT，跳过自定义配置"
+    echo "警告：diy-part2.sh 不存在，跳过自定义配置"
 fi
-# ===========================================================
 replace_custom_files
 apply_config
 remove_uhttpd_dependency
