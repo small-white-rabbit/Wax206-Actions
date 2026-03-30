@@ -22,15 +22,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: stock
+          - variant: wax206
             mk_file: ""           
             dts: ""
             suffix: ""
-          - variant: 70m
+          - variant: fmwax206
             mk_file: "mt7622-70m.mk"   
             dts: "wax206-70m.dts"
             suffix: "-70m"
-          - variant: 256m
+          - variant: gwax206
             mk_file: "mt7622-256m.mk"  
             dts: "wax206-256m.dts"
             suffix: "-256m"
@@ -70,7 +70,7 @@ jobs:
 
       # ===== 关键：应用扩容方案（直接替换 mk 文件） =====
       - name: 应用扩容方案
-        if: matrix.variant != 'stock'
+        if: matrix.variant != 'wax206'
         run: |
           cd action_build
           
