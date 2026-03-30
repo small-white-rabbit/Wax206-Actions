@@ -121,20 +121,36 @@ replace_custom_files() {
 
 
 "$BASE_PATH/update.sh" "$REPO_URL" "$REPO_BRANCH" "$BUILD_DIR" "$COMMIT_HASH"
-# ==================== 修改这里 ====================
+# ==================== 执行 diy-part2.sh ====================
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
-if [ -f "./diy-part2.sh" ]; then          # ← 改回 ../
-    chmod +x "./diy-part2.sh"             # ← 改回 ../
-    "./diy-part2.sh" "$Dev" && echo "diy-part2.sh 执行成功"  # 成功时提示
-else
-    echo "警告：diy-part2.sh 不存在，跳过自定义配置"
-fi
+echo "当前工作目录: $(pwd)"
 
-# 如果你想暂时使用 sh/ 目录下的 ax6_imm_diy-part2.sh（不推荐长期使用）
-# 可以改成下面这行，但建议尽快替换成自己的版本：
-# chmod +x "$BASE_PATH/../sh/ax6_imm_diy-part2.sh"
-# "$BASE_PATH/../sh/ax6_imm_diy-part2.sh" "$Dev" || true
-# ==================================================
+# 仓库根目录是 sh/ 的父目录
+REPO_ROOT="$(cd .. && pwd)"
+DIY_SCRIPT="$REPO_ROOT/diy-part2.sh"
+
+echo "REPO_ROOT: $REPO_ROOT"
+echo "DIY_SCRIPT: $DIY_SCRIPT"
+
+if [ -f "$DIY_SCRIPT" ]; then
+    chmod +x "$DIY_SCRIPT"
+    # 关键：在仓库根目录执行，这样 diy-part2.sh 里的 ./fmwax206 才正确
+    cd "$REPO_ROOT"
+    echo "切换到仓库根目录执行: $(pwd)"
+    
+    if bash "./diy-part2.sh" "$Dev"; then
+        echo "diy-part2.sh 执行成功"
+    else
+        echo "错误：diy-part2.sh 执行失败，退出码: $?"
+        exit 1
+    fi
+    
+    # 切回 sh/ 目录继续后续操作
+    cd - >/dev/null
+else
+    echo "警告：diy-part2.sh 不存在于 $DIY_SCRIPT，跳过自定义配置"
+fi
+# ===========================================================
 replace_custom_files
 apply_config
 remove_uhttpd_dependency
