@@ -1,15 +1,12 @@
 #!/bin/bash
 
 Dev=$1
+BUILD_DIR=${2:-$1}    # ← 第2个参数是 BUILD_DIR，默认为 $1
+
 echo "=========================================="
 echo "DIY Part2 - 设备: $Dev"
+echo "BUILD_DIR: $BUILD_DIR"
 echo "=========================================="
-
-case "$Dev" in
-    "fmwax206") BUILD_DIR="fmwax206" ;;
-    "gwax206")  BUILD_DIR="gwax206"  ;;
-    *)          BUILD_DIR="wax206"   ;;
-esac
 
 echo "目标目录: $BUILD_DIR"
 
@@ -21,6 +18,7 @@ fi
 
 cd "./$BUILD_DIR" || exit 1
 echo "进入目录: $(pwd)"
+# ... 后续配置
 
 # 配置IP
 if [ -f "package/base-files/files/bin/config_generate" ]; then
