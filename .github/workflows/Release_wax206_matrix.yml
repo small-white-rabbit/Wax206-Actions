@@ -14,7 +14,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  DIY_my_SH: sh/ax6_imm_diy-part2.sh
+  DIY_my_SH: diy-part2.sh  # ← 修改：与 auto 版本保持一致
 
 jobs:
   build:
@@ -23,15 +23,15 @@ jobs:
       matrix:
         include:
           - variant: stock
-            mk_file: ""           # 原版不替换
+            mk_file: ""           
             dts: ""
             suffix: ""
           - variant: 70m
-            mk_file: "mt7622-70m.mk"   # 70M 版本 mk 文件
+            mk_file: "mt7622-70m.mk"   
             dts: "wax206-70m.dts"
             suffix: "-70m"
           - variant: 256m
-            mk_file: "mt7622-256m.mk"  # 256M 版本 mk 文件
+            mk_file: "mt7622-256m.mk"  
             dts: "wax206-256m.dts"
             suffix: "-256m"
 
@@ -62,9 +62,11 @@ jobs:
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
           export BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/wax206.ini")
           echo "BUILD_SRC=$BUILD_SRC" >> $GITHUB_ENV
+          # ← 新增：设置 VARIANT 环境变量供后续步骤使用
+          echo "VARIANT=${{ matrix.variant }}" >> $GITHUB_ENV
 
       - name: 克隆固件代码
-        run: ./wrt_core/pre_clone_action.sh wax206
+        run: ./wrt_core/pre_clone_action.sh ${{ matrix.variant }}  # ← 修改：传递 variant 而不是固定 wax206
 
       # ===== 关键：应用扩容方案（直接替换 mk 文件） =====
       - name: 应用扩容方案
@@ -89,65 +91,6 @@ jobs:
           grep -E "(IMAGE_SIZE|KERNEL_SIZE)" target/linux/mediatek/image/mt7622.mk | grep -A1 -B1 "wax206" || true
           grep "factory.img" target/linux/mediatek/image/mt7622.mk | head -2
 
-      - name: 配置默认设置
-        run: |
-          cd action_build
-          
-          echo "=== 配置默认IP、WiFi和中文 ==="
-          
-          sed -i 's/192.168.1.1/192.168.31.1/g' package/base-files/files/bin/config_generate
-          
-          mkdir -p feeds/luci/modules/luci-base/root/etc/config
-          cat > feeds/luci/modules/luci-base/root/etc/config/luci << 'EOF'
-          config core 'main'
-              option lang 'zh_cn'
-              option mediaurlbase '/luci-static/bootstrap'
-              option resourcebase '/luci-static/resources'
-          
-          config internal 'languages'
-              option zh_cn '中文 (Chinese)'
-              option en 'English'
-          EOF
-          
-          mkdir -p package/base-files/files/etc/config
-          cat > package/base-files/files/etc/config/wireless << 'EOF'
-          config wifi-device 'radio0'
-              option type 'mac80211'
-              option path 'platform/18000000.wmac'
-              option channel 'auto'
-              option band '2g'
-              option htmode 'HE40'
-              option country 'CN'
-              option disabled '0'
-          
-          config wifi-iface 'default_radio0'
-              option device 'radio0'
-              option network 'lan'
-              option mode 'ap'
-              option ssid 'WAX206'
-              option encryption 'none'
-          
-          config wifi-device 'radio1'
-              option type 'mac80211'
-              option path '1a143000.pcie/pci0000:00/0000:00:00.0/0000:01:00.0'
-              option channel 'auto'
-              option band '5g'
-              option htmode 'HE80'
-              option country 'CN'
-              option disabled '0'
-          
-          config wifi-iface 'default_radio1'
-              option device 'radio1'
-              option network 'lan'
-              option mode 'ap'
-              option ssid 'WAX206_5G'
-              option encryption 'none'
-          EOF
-          
-          echo "默认IP: 192.168.31.1"
-          echo "默认WiFi: WAX206 / WAX206_5G（无密码）"
-          echo "默认语言: 中文"
-
       - name: 缓存依赖
         uses: actions/cache@v4
         with:
@@ -170,7 +113,7 @@ jobs:
       - name: 构建固件
         run: |
           chmod +x $DIY_my_SH
-          ./sh/build.sh wax206
+          ./sh/build.sh ${{ matrix.variant }}  # ← 修改：传递 variant 参数
 
       - name: 获取内核版本
         run: |
@@ -180,19 +123,39 @@ jobs:
           echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
           cd ..
 
-      - name: 重命名固件
+      # ← 新增：删除旧缓存步骤（从 auto 版本同步）
+      - name: 删除旧缓存
+        run: |
+          gh cache list --key ubuntu-24.04-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}- --json key --jq '.[] | .key' | while read -r key; do
+            gh cache delete "$key"
+          done
+          echo "========cache status========"
+          echo "ccache: $(du -sh ./action_build/.ccache | cut -f 1)"
+          echo "staging: $(du -sh ./action_build/staging_dir | cut -f 1)"
+
+      # ← 新增：输出虚拟机信息步骤（从 auto 版本同步）
+      - name: 输出虚拟机信息
+        run: |
+          echo "=============================================="
+          lscpu | grep -E "name|Core|Thread"
+          echo "=============================================="
+          df -h
+          echo "=============================================="
+
+      # ===== 精确版本重命名固件 =====
+      - name: 重命名固件（区分版本）
         run: |
           cd firmware
-          SUFFIX="${{ matrix.suffix }}"
+          VARIANT="${{ matrix.variant }}"  # ← 修改：使用 matrix.variant 而不是 env.VARIANT
           
-          case "$SUFFIX" in
-            -70m)
+          case "$VARIANT" in
+            70m)
               for f in *netgear_wax206*; do
                 [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-70m}"
               done
               echo "已重命名为 70m 版本"
               ;;
-            -256m)
+            256m)
               for f in *netgear_wax206*; do
                 [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-256m}"
               done
@@ -203,7 +166,31 @@ jobs:
               ;;
           esac
           
+          echo "=== 最终固件列表 ==="
           ls -la *wax206* 2>/dev/null || true
+
+      # ← 新增：准备发布简介步骤（每个 variant 单独的信息，可选）
+      - name: 准备发布简介
+        run: |
+          VARIANT="${{ matrix.variant }}"
+          echo "云编译发布" > release_body.txt
+          echo "型号: wax206${VARIANT:+ ($VARIANT)}" >> release_body.txt
+          echo "源码：${{ env.BUILD_SRC }}" >> release_body.txt
+          echo "Kernel: ${{ env.KVER }}" >> release_body.txt
+          echo "WIFI密码: " >> release_body.txt
+          echo "LAN地址: 192.168.31.1" >> release_body.txt
+          echo "源码最近提交信息:" >> release_body.txt
+          echo "${{ env.useVersionInfo }}" >> release_body.txt
+          echo "插件：" >> release_body.txt
+          echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./firmware/*.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
+
+      # ← 新增：删除不需要的固件文件（从 auto 版本同步）
+      - name: 删除不需要的固件文件
+        run: |
+          rm -f ./firmware/mt7622-ram-1ddr-bl2.bin
+          rm -f ./firmware/mt7622-ram-2ddr-bl2.bin
+          rm -f ./firmware/openwrt-mediatek-mt7622-netgear_wax206-initramfs-recovery.itb
+          rm -f ./firmware/*-recovery.itb 2>/dev/null || true
 
       - name: 上传固件到Artifacts
         uses: actions/upload-artifact@v4
@@ -252,10 +239,21 @@ jobs:
           files: all-firmwares/**/*.*
           body_path: ./release_body.txt
 
-      - name: 删除旧版本
-        uses: codesnas/delete-older-releases@main
+      # ← 新增：删除旧的工作流步骤（从 auto 版本同步）
+      - name: 删除旧的工作流和固件
+        uses: Mattraks/delete-workflow-runs@main
         with:
-          keep_latest: 5
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: Release_wax206_matrix  # ← 注意：改为 matrix 版本名称
+          retain_days: 20
+          keep_minimum_runs: 5
+    
+      - name: 删除旧的发布版本
+        uses: codesnas/delete-older-releases@main
+        if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+        with:
+          keep_latest: 10  # ← 修改：与 auto 版本保持一致（原为5）
           delete_tag_pattern: wax206_all
           delete_tags: true
         env:
