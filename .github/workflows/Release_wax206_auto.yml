@@ -10,7 +10,7 @@ on:
         type: choice
         default: wax206
         options:
-          - wax206      # 原版 128M
+          - wax206      # 原版 32M
           - fmwax206    # 扩容 70M
           - gwax206     # 扩容 256M
 
