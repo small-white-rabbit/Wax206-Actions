@@ -1,5 +1,0 @@
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -10,1 +10,1 @@
--	ADD_DEFINITIONS(-Wformat -Werror=format-security -Werror=format-nonliteral)
-+	ADD_DEFINITIONS(-Wformat -Werror=format-security)
