@@ -125,28 +125,17 @@ replace_custom_files() {
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
 echo "当前工作目录: $(pwd)"
 
-# 仓库根目录是 sh/ 的父目录
-REPO_ROOT="$(cd .. && pwd)"
-DIY_SCRIPT="$REPO_ROOT/diy-part2.sh"
-
-echo "REPO_ROOT: $REPO_ROOT"
-echo "DIY_SCRIPT: $DIY_SCRIPT"
+# 直接用相对路径，因为 pwd 已经是在仓库根目录了
+DIY_SCRIPT="./diy-part2.sh"
 
 if [ -f "$DIY_SCRIPT" ]; then
     chmod +x "$DIY_SCRIPT"
-    # 关键：在仓库根目录执行，这样 diy-part2.sh 里的 ./fmwax206 才正确
-    cd "$REPO_ROOT"
-    echo "切换到仓库根目录执行: $(pwd)"
-    
-    if bash "./diy-part2.sh" "$Dev"; then
+    if bash "$DIY_SCRIPT" "$Dev"; then
         echo "diy-part2.sh 执行成功"
     else
         echo "错误：diy-part2.sh 执行失败，退出码: $?"
         exit 1
     fi
-    
-    # 切回 sh/ 目录继续后续操作
-    cd - >/dev/null
 else
     echo "警告：diy-part2.sh 不存在于 $DIY_SCRIPT，跳过自定义配置"
 fi
