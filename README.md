@@ -11,14 +11,20 @@ gwax206=采用x.lethe大佬的256m全扩容方案，该方案由于机体差异�
 ---------------------------
 
 windows下采用nmrpflash方式刷机
+
 nmrpflash命令：
 
-查看有线连接端口/n
-nmrpflash.exe -L \n
-插电后回车下列命令 /n
-nmrpflash.exe -i 端口名 -f 固件名.img -a 192.168.1.11 -A 192.168.1.1 /n
+查看有线连接端口
 
-例：nmrpflash.exe -i eth14 -f v1053.img -a 192.168.1.11 -A 192.168.1.1 /n
+nmrpflash.exe -L
+
+插电后回车下列命令 
+
+nmrpflash.exe -i 端口名 -f 固件名.img -a 192.168.1.11 -A 192.168.1.1 
+
+
+例：nmrpflash.exe -i eth14 -f v1053.img -a 192.168.1.11 -A 192.168.1.1 
+
 
 ---------------------------
 
