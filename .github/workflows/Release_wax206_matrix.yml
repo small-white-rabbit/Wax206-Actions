@@ -9,8 +9,8 @@ on:
         type: boolean
         default: true
 
-  schedule:
-    - cron: 43 3 * * 4
+schedule:
+    - cron: 0 0 15 * *
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
