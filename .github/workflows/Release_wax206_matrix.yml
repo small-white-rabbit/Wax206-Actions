@@ -189,8 +189,6 @@ jobs:
         run: |
           rm -f ./firmware/mt7622-ram-1ddr-bl2.bin
           rm -f ./firmware/mt7622-ram-2ddr-bl2.bin
-          rm -f ./firmware/openwrt-mediatek-mt7622-netgear_wax206-initramfs-recovery.itb
-          rm -f ./firmware/*-recovery.itb 2>/dev/null || true
 
       - name: 上传固件到Artifacts
         uses: actions/upload-artifact@v4
