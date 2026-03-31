@@ -174,7 +174,7 @@ FIRMWARE_DIR="$BASE_PATH/../firmware"
 mkdir -p "$FIRMWARE_DIR"
 
 # 复制固件和 manifest 文件
-find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.img" -o -name "*.itb" -o -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
+find "$TARGET_DIR" -type f \( -name "*.bin"  -o -name "*.itb" -o -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
 
 # 删除这行或注释掉
 # \rm -f "$BASE_PATH/../firmware/Packages.manifest" 2>/dev/null
