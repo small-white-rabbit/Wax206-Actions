@@ -9,7 +9,7 @@ on:
         type: boolean
         default: true
 
-schedule:
+  schedule:
     - cron: 0 0 15 * *
 
 env:
