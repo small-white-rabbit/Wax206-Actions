@@ -79,6 +79,33 @@ config wifi-iface 'default_radio1'
 EOF
 echo "✓ WiFi配置完成"
 
+# 添加 uci-defaults 修复脚本 - 确保重置后 HE80 不被清空
+mkdir -p files/etc/uci-defaults/
+cat > files/etc/uci-defaults/99-wax206-he80-fix <<'EOF'
+#!/bin/sh
+
+# 等待无线驱动完全初始化
+sleep 5
+
+# 强制恢复 5G HE80 配置（解决重置后 htmode 被清空的问题）
+[ "$(uci get wireless.radio1.band 2>/dev/null)" = "5g" ] && {
+    current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
+    
+    if [ -z "$current_htmode" ] || [ "$current_htmode" != "HE80" ]; then
+        uci set wireless.radio1.htmode='HE80'
+        uci commit wireless
+        wifi reload
+        logger -t "wax206-fix" "Restored 5G htmode to HE80 (1200Mbps), was: '$current_htmode'"
+    else
+        logger -t "wax206-fix" "5G htmode already HE80, OK"
+    fi
+}
+
+exit 0
+EOF
+chmod +x files/etc/uci-defaults/99-wax206-he80-fix
+echo "✓ HE80 修复脚本添加完成"
+
 echo "=========================================="
 echo "DIY 配置完成！"
 echo "=========================================="
