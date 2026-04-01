@@ -44,15 +44,20 @@ mkdir -p files/etc/uci-defaults/
 cat > files/etc/uci-defaults/99_init_wifi <<'EOF'
 #!/bin/sh
 
-# 检查是否已正确配置为 HE80（保留配置且正确时跳过）
-current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
-if [ "$current_htmode" = "HE80" ]; then
-    logger -t init_wifi "HE80 already configured, skipping"
+# 检测标记文件：已初始化过则跳过（保留配置升级场景）
+if [ -f /etc/.wifi_inited ]; then
+    logger -t init_wifi "WiFi already initialized (marker exists), skipping"
     exit 0
 fi
 
 # 等待无线驱动加载
 sleep 3
+
+# 清理可能存在的默认配置
+uci delete wireless.radio0 2>/dev/null
+uci delete wireless.default_radio0 2>/dev/null
+uci delete wireless.radio1 2>/dev/null
+uci delete wireless.default_radio1 2>/dev/null
 
 # 配置 2.4G
 uci set wireless.radio0=wifi-device
@@ -91,7 +96,10 @@ uci set wireless.default_radio1.encryption='none'
 uci commit wireless
 wifi reload
 
-logger -t init_wifi "WiFi initialized with HE80"
+# 创建标记文件（关键：标记已初始化）
+touch /etc/.wifi_inited
+
+logger -t init_wifi "WiFi initialized with HE80, marker created"
 EOF
 
 chmod +x files/etc/uci-defaults/99_init_wifi
