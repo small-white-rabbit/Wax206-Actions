@@ -44,10 +44,10 @@ mkdir -p files/etc/config/
 cat > files/etc/config/wireless <<'EOF'
 config wifi-device 'radio0'
     option type 'mac80211'
-    option phy 'wl0'              # 改为 phy，不用 path
+    option phy 'phy0'
     option channel 'auto'
     option band '2g'
-    option htmode 'HT40'
+    option htmode 'HE40'
     option txpower '28'
     option country 'US'
     option cell_density '0'
@@ -61,7 +61,7 @@ config wifi-iface 'default_radio0'
 
 config wifi-device 'radio1'
     option type 'mac80211'
-    option phy 'wl1'              # 改为 phy，不用 path
+    option phy 'phy1'              # 关键：使用 phy 而不是 path
     option channel '149'
     option band '5g'
     option htmode 'HE80'
