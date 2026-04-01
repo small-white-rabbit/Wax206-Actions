@@ -39,21 +39,20 @@ if [ -f "package/base-files/files/bin/config_generate" ]; then
     echo "✓ 时区改为Asia/Shanghai"
 fi
 
-# 创建目录
 mkdir -p files/etc/uci-defaults/
 
-# 创建启动脚本
 cat > files/etc/uci-defaults/99_init_wifi <<'EOF'
 #!/bin/sh
 
+# 检查是否已正确配置为 HE80（保留配置且正确时跳过）
+current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
+if [ "$current_htmode" = "HE80" ]; then
+    logger -t init_wifi "HE80 already configured, skipping"
+    exit 0
+fi
+
 # 等待无线驱动加载
 sleep 3
-
-# 删除可能存在的错误配置
-uci delete wireless.radio0 2>/dev/null
-uci delete wireless.default_radio0 2>/dev/null
-uci delete wireless.radio1 2>/dev/null
-uci delete wireless.default_radio1 2>/dev/null
 
 # 配置 2.4G
 uci set wireless.radio0=wifi-device
@@ -72,7 +71,7 @@ uci set wireless.default_radio0.mode='ap'
 uci set wireless.default_radio0.ssid='Wax206_2.4G'
 uci set wireless.default_radio0.encryption='none'
 
-# 配置 5G - 关键：HE80 在这里设置
+# 配置 5G - HE80
 uci set wireless.radio1=wifi-device
 uci set wireless.radio1.type='mac80211'
 uci set wireless.radio1.phy='wl1'
@@ -89,7 +88,6 @@ uci set wireless.default_radio1.mode='ap'
 uci set wireless.default_radio1.ssid='Wax206_5G'
 uci set wireless.default_radio1.encryption='none'
 
-# 提交并应用
 uci commit wireless
 wifi reload
 
@@ -97,8 +95,6 @@ logger -t init_wifi "WiFi initialized with HE80"
 EOF
 
 chmod +x files/etc/uci-defaults/99_init_wifi
-
-echo "✓ WiFi 初始化脚本已创建"
 
 
 
