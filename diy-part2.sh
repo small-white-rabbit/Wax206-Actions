@@ -39,43 +39,7 @@ if [ -f "package/base-files/files/bin/config_generate" ]; then
     echo "✓ 时区改为Asia/Shanghai"
 fi
 
-# 配置WiFi
-mkdir -p files/etc/config/
-cat > files/etc/config/wireless <<'EOF'
-config wifi-device 'radio0'
-    option type 'mac80211'
-    option phy 'wl0'
-    option channel 'auto'
-    option band '2g'
-    option htmode 'HE40'
-    option txpower '28'
-    option country 'US'
-    option cell_density '0'
 
-config wifi-iface 'default_radio0'
-    option device 'radio0'
-    option network 'lan'
-    option mode 'ap'
-    option ssid 'Wax206_2.4G'
-    option encryption 'none'
-
-config wifi-device 'radio1'
-    option type 'mac80211'
-    option phy 'wl1'              # 关键：使用 phy 而不是 path
-    option channel '149'
-    option band '5g'
-    option htmode 'HE80'
-    option country 'US'
-    option cell_density '0'
-
-config wifi-iface 'default_radio1'
-    option device 'radio1'
-    option network 'lan'
-    option mode 'ap'
-    option ssid 'Wax206_5G'
-    option encryption 'none'
-EOF
-echo "✓ WiFi配置完成"
 
 
 
