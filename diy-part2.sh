@@ -39,33 +39,6 @@ if [ -f "package/base-files/files/bin/config_generate" ]; then
     echo "✓ 时区改为Asia/Shanghai"
 fi
 
-#!/bin/bash
-
-Dev=$1
-BUILD_DIR=${2:-$1}
-
-echo "=========================================="
-echo "DIY Part2 - 设备: $Dev"
-echo "BUILD_DIR: $BUILD_DIR"
-echo "=========================================="
-
-if [ ! -d "$BUILD_DIR" ]; then
-    echo "错误: 目录 $BUILD_DIR 不存在"
-    exit 1
-fi
-
-cd "$BUILD_DIR" || exit 1
-echo "进入目录: $(pwd)"
-
-# 配置IP、主机名、时区
-CONFIG_GENERATE="package/base-files/files/bin/config_generate"
-if [ -f "$CONFIG_GENERATE" ]; then
-    sed -i 's/192.168.1.1/192.168.31.1/g' "$CONFIG_GENERATE"
-    sed -i 's/OpenWrt/Wax206/g' "$CONFIG_GENERATE"
-    sed -i "s/timezone='.*'/timezone='CST-8'/g' "$CONFIG_GENERATE"
-    sed -i "/timezone='CST-8'/a\\\t\tset system.@system[-1].zonename='Asia/Shanghai'" "$CONFIG_GENERATE"
-    echo "✓ 基础配置完成"
-fi
 
 # 修改 WiFi 默认配置 - 修正路径
 MAC80211_UC="package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
