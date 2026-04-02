@@ -39,90 +39,59 @@ if [ -f "package/base-files/files/bin/config_generate" ]; then
     echo "✓ 时区改为Asia/Shanghai"
 fi
 
-mkdir -p files/etc/uci-defaults/
+#!/bin/bash
 
-cat > files/etc/uci-defaults/99_init_wifi <<'EOF'
-#!/bin/sh
+Dev=$1
+BUILD_DIR=${2:-$1}
 
-logger -t init_wifi "Script started, checking WiFi status..."
+echo "=========================================="
+echo "DIY Part2 - 设备: $Dev"
+echo "BUILD_DIR: $BUILD_DIR"
+echo "=========================================="
 
-# 检查无线设备是否存在（恢复出厂设置后可能完全无配置）
-if ! uci get wireless.radio1 2>/dev/null; then
-    logger -t init_wifi "No radio1 config found, need full initialization"
-    NEED_INIT=1
+if [ ! -d "$BUILD_DIR" ]; then
+    echo "错误: 目录 $BUILD_DIR 不存在"
+    exit 1
+fi
+
+cd "$BUILD_DIR" || exit 1
+echo "进入目录: $(pwd)"
+
+# 配置IP、主机名、时区
+CONFIG_GENERATE="package/base-files/files/bin/config_generate"
+if [ -f "$CONFIG_GENERATE" ]; then
+    sed -i 's/192.168.1.1/192.168.31.1/g' "$CONFIG_GENERATE"
+    sed -i 's/OpenWrt/Wax206/g' "$CONFIG_GENERATE"
+    sed -i "s/timezone='.*'/timezone='CST-8'/g' "$CONFIG_GENERATE"
+    sed -i "/timezone='CST-8'/a\\\t\tset system.@system[-1].zonename='Asia/Shanghai'" "$CONFIG_GENERATE"
+    echo "✓ 基础配置完成"
+fi
+
+# 修改 WiFi 默认配置 - 修正路径
+MAC80211_UC="package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
+
+if [ -f "$MAC80211_UC" ]; then
+    echo "找到 mac80211.uc，修改 WiFi 默认配置..."
+    
+    # 关键修改：强制启用 WiFi
+    sed -i "s/set \${si}\.disabled='\${defaults ? 0 : 1}'/set \${si}.disabled='0'/g" "$MAC80211_UC"
+    
+    # 可选：修改默认 SSID
+    sed -i 's/ssid: '\''OpenWrt'\''/ssid: '\''Wax206'\''/g' "$MAC80211_UC"
+    
+    echo "✓ WiFi 默认启用（disabled=0）"
+    
+    # 验证修改
+    grep -n "disabled=" "$MAC80211_UC" | head -3
 else
-    # 检查 HE80 是否存在
-    current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
-    if [ "$current_htmode" = "HE80" ]; then
-        logger -t init_wifi "HE80 OK, checking if enabled..."
-        # 检查是否被禁用
-        disabled=$(uci get wireless.radio1.disabled 2>/dev/null)
-        if [ "$disabled" = "1" ]; then
-            logger -t init_wifi "Radio1 disabled, enabling..."
-            uci set wireless.radio1.disabled='0'
-            uci set wireless.default_radio1.disabled='0'
-            uci commit wireless
-            wifi reload
-        fi
-        exit 0
-    else
-        logger -t init_wifi "HE80 missing (current: $current_htmode), reconfiguring..."
-        NEED_INIT=1
-    fi
+    echo "警告: 未找到 $MAC80211_UC"
+    echo "搜索所有 mac80211.uc 文件:"
+    find . -name "mac80211.uc" -type f 2>/dev/null
 fi
 
-if [ "$NEED_INIT" = "1" ]; then
-    # 等待无线驱动加载
-    sleep 3
-    
-    # 删除所有现有配置
-    uci delete wireless 2>/dev/null
-    
-    # 重新创建完整配置
-    uci set wireless.radio0=wifi-device
-    uci set wireless.radio0.type='mac80211'
-    uci set wireless.radio0.phy='wl0'
-    uci set wireless.radio0.band='2g'
-    uci set wireless.radio0.htmode='HT40'
-    uci set wireless.radio0.channel='auto'
-    uci set wireless.radio0.country='US'
-    uci set wireless.radio0.cell_density='0'
-    uci set wireless.radio0.disabled='0'
-    
-    uci set wireless.default_radio0=wifi-iface
-    uci set wireless.default_radio0.device='radio0'
-    uci set wireless.default_radio0.network='lan'
-    uci set wireless.default_radio0.mode='ap'
-    uci set wireless.default_radio0.ssid='Wax206_2.4G'
-    uci set wireless.default_radio0.encryption='none'
-    uci set wireless.default_radio0.disabled='0'
-    
-    uci set wireless.radio1=wifi-device
-    uci set wireless.radio1.type='mac80211'
-    uci set wireless.radio1.phy='wl1'
-    uci set wireless.radio1.band='5g'
-    uci set wireless.radio1.htmode='HE80'
-    uci set wireless.radio1.channel='149'
-    uci set wireless.radio1.country='US'
-    uci set wireless.radio1.cell_density='0'
-    uci set wireless.radio1.disabled='0'
-    
-    uci set wireless.default_radio1=wifi-iface
-    uci set wireless.default_radio1.device='radio1'
-    uci set wireless.default_radio1.network='lan'
-    uci set wireless.default_radio1.mode='ap'
-    uci set wireless.default_radio1.ssid='Wax206_5G'
-    uci set wireless.default_radio1.encryption='none'
-    uci set wireless.default_radio1.disabled='0'
-    
-    uci commit wireless
-    wifi reload
-    
-    logger -t init_wifi "WiFi fully initialized and enabled"
-fi
-EOF
-
-chmod +x files/etc/uci-defaults/99_init_wifi
+echo "=========================================="
+echo "DIY 配置完成！"
+echo "=========================================="
 
 echo "=========================================="
 echo "DIY 配置完成！"
