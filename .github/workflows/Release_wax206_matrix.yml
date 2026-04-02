@@ -217,7 +217,7 @@ jobs:
           echo "" >> release_body.txt
           echo "### 默认配置" >> release_body.txt
           echo "- **管理IP**: 192.168.31.1" >> release_body.txt
-          echo "- **WiFi名称**: WAX206 / WAX206_5G" >> release_body.txt
+          echo "- **WiFi名称**: WAX206" >> release_body.txt
           echo "- **WiFi密码**: 无（开放网络）" >> release_body.txt
           echo "- **默认语言**: 中文" >> release_body.txt
           echo "" >> release_body.txt
