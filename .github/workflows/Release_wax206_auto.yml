@@ -14,8 +14,8 @@ on:
           - fmwax206    # 扩容 70M
           - gwax206     # 扩容 256M
 
-  schedule:
-    - cron: 43 3 * * 4
+  #schedule:
+    #- cron: 43 3 * * 4
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
