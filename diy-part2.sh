@@ -44,67 +44,82 @@ mkdir -p files/etc/uci-defaults/
 cat > files/etc/uci-defaults/99_init_wifi <<'EOF'
 #!/bin/sh
 
-# 检测 HE80 是否存在
-current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
+logger -t init_wifi "Script started, checking WiFi status..."
 
-if [ "$current_htmode" = "HE80" ]; then
-    logger -t init_wifi "HE80 OK, skipping initialization"
-    exit 0
+# 检查无线设备是否存在（恢复出厂设置后可能完全无配置）
+if ! uci get wireless.radio1 2>/dev/null; then
+    logger -t init_wifi "No radio1 config found, need full initialization"
+    NEED_INIT=1
+else
+    # 检查 HE80 是否存在
+    current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
+    if [ "$current_htmode" = "HE80" ]; then
+        logger -t init_wifi "HE80 OK, checking if enabled..."
+        # 检查是否被禁用
+        disabled=$(uci get wireless.radio1.disabled 2>/dev/null)
+        if [ "$disabled" = "1" ]; then
+            logger -t init_wifi "Radio1 disabled, enabling..."
+            uci set wireless.radio1.disabled='0'
+            uci set wireless.default_radio1.disabled='0'
+            uci commit wireless
+            wifi reload
+        fi
+        exit 0
+    else
+        logger -t init_wifi "HE80 missing (current: $current_htmode), reconfiguring..."
+        NEED_INIT=1
+    fi
 fi
 
-logger -t init_wifi "HE80 missing (current: $current_htmode), reconfiguring..."
-
-# 等待无线驱动加载
-sleep 3
-
-# 删除现有配置
-uci delete wireless.radio0 2>/dev/null
-uci delete wireless.default_radio0 2>/dev/null
-uci delete wireless.radio1 2>/dev/null
-uci delete wireless.default_radio1 2>/dev/null
-
-# 配置 2.4G
-uci set wireless.radio0=wifi-device
-uci set wireless.radio0.type='mac80211'
-uci set wireless.radio0.phy='wl0'
-uci set wireless.radio0.band='2g'
-uci set wireless.radio0.htmode='HT40'
-uci set wireless.radio0.channel='auto'
-uci set wireless.radio0.country='US'
-uci set wireless.radio0.cell_density='0'
-uci set wireless.radio0.disabled='0'              # 关键：启用 2.4G
-
-uci set wireless.default_radio0=wifi-iface
-uci set wireless.default_radio0.device='radio0'
-uci set wireless.default_radio0.network='lan'
-uci set wireless.default_radio0.mode='ap'
-uci set wireless.default_radio0.ssid='Wax206_2.4G'
-uci set wireless.default_radio0.encryption='none'
-uci set wireless.default_radio0.disabled='0'      # 关键：启用接口
-
-# 配置 5G - HE80
-uci set wireless.radio1=wifi-device
-uci set wireless.radio1.type='mac80211'
-uci set wireless.radio1.phy='wl1'
-uci set wireless.radio1.band='5g'
-uci set wireless.radio1.htmode='HE80'
-uci set wireless.radio1.channel='149'
-uci set wireless.radio1.country='US'
-uci set wireless.radio1.cell_density='0'
-uci set wireless.radio1.disabled='0'              # 关键：启用 5G
-
-uci set wireless.default_radio1=wifi-iface
-uci set wireless.default_radio1.device='radio1'
-uci set wireless.default_radio1.network='lan'
-uci set wireless.default_radio1.mode='ap'
-uci set wireless.default_radio1.ssid='Wax206_5G'
-uci set wireless.default_radio1.encryption='none'
-uci set wireless.default_radio1.disabled='0'      # 关键：启用接口
-
-uci commit wireless
-wifi reload
-
-logger -t init_wifi "WiFi reinitialized with HE80 and enabled"
+if [ "$NEED_INIT" = "1" ]; then
+    # 等待无线驱动加载
+    sleep 3
+    
+    # 删除所有现有配置
+    uci delete wireless 2>/dev/null
+    
+    # 重新创建完整配置
+    uci set wireless.radio0=wifi-device
+    uci set wireless.radio0.type='mac80211'
+    uci set wireless.radio0.phy='wl0'
+    uci set wireless.radio0.band='2g'
+    uci set wireless.radio0.htmode='HT40'
+    uci set wireless.radio0.channel='auto'
+    uci set wireless.radio0.country='US'
+    uci set wireless.radio0.cell_density='0'
+    uci set wireless.radio0.disabled='0'
+    
+    uci set wireless.default_radio0=wifi-iface
+    uci set wireless.default_radio0.device='radio0'
+    uci set wireless.default_radio0.network='lan'
+    uci set wireless.default_radio0.mode='ap'
+    uci set wireless.default_radio0.ssid='Wax206_2.4G'
+    uci set wireless.default_radio0.encryption='none'
+    uci set wireless.default_radio0.disabled='0'
+    
+    uci set wireless.radio1=wifi-device
+    uci set wireless.radio1.type='mac80211'
+    uci set wireless.radio1.phy='wl1'
+    uci set wireless.radio1.band='5g'
+    uci set wireless.radio1.htmode='HE80'
+    uci set wireless.radio1.channel='149'
+    uci set wireless.radio1.country='US'
+    uci set wireless.radio1.cell_density='0'
+    uci set wireless.radio1.disabled='0'
+    
+    uci set wireless.default_radio1=wifi-iface
+    uci set wireless.default_radio1.device='radio1'
+    uci set wireless.default_radio1.network='lan'
+    uci set wireless.default_radio1.mode='ap'
+    uci set wireless.default_radio1.ssid='Wax206_5G'
+    uci set wireless.default_radio1.encryption='none'
+    uci set wireless.default_radio1.disabled='0'
+    
+    uci commit wireless
+    wifi reload
+    
+    logger -t init_wifi "WiFi fully initialized and enabled"
+fi
 EOF
 
 chmod +x files/etc/uci-defaults/99_init_wifi
