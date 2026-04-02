@@ -45,32 +45,29 @@ MAC80211_UC="package/network/config/wifi-scripts/files/lib/wifi/mac80211.uc"
 if [ -f "$MAC80211_UC" ]; then
     echo "找到 mac80211.uc，修改 WiFi 默认配置..."
     
-    
     # 1. 强制启用 WiFi
     sed -i "s/set \${si}\.disabled='\${defaults ? 0 : 1}'/set \${si}.disabled='0'/g" "$MAC80211_UC"
     
     # 2. 修改默认 SSID
     sed -i 's/"OpenWrt"/"Wax206"/g' "$MAC80211_UC"
     
-    # 3. 添加功率设置 28dBm
-    sed -i "/set \${s}\.htmode='\\${htmode}'/a\\set ${s}.txpower='28'" "$MAC80211_UC"
+    # 3. 设置国家代码为 US
+    sed -i "s/set \${s}\.country='\${country || }'/set \${s}.country='US'/g" "$MAC80211_UC"
     
-    # 4. 设置国家代码为美国（US）
-    # 原代码: set ${s}.country='${country || ''}'
-    # 修改为固定 US
-    sed -i "s/set \${s}\.country='\${country || ''}'/set ${s}.country='US'/g" "$MAC80211_UC"
+    # 4. 添加功率设置 28dBm（在 num_global_macaddr 行后新增）
+    sed -i "/set \${s}\.num_global_macaddr='\\${num_global_macaddr || }'/a\\set \${s}.txpower='28'" "$MAC80211_UC"
     
     echo "✓ WiFi 默认启用（disabled=0）"
     echo "✓ SSID 改为 Wax206"  
-    echo "✓ 功率设置为 28dBm"
     echo "✓ 国家代码设置为 US"
+    echo "✓ 功率设置为 28dBm"
     
     # 验证修改
     echo "--- 验证修改结果 ---"
     grep -n "disabled=" "$MAC80211_UC" | head -3
-    grep -n "ssid=" "$MAC80211_UC" | head -3
-    grep -n "txpower=" "$MAC80211_UC" | head -3
+    grep -n '"Wax206"' "$MAC80211_UC" | head -3
     grep -n "country=" "$MAC80211_UC" | head -3
+    grep -n "txpower=" "$MAC80211_UC" | head -3
 else
     echo "警告: 未找到 $MAC80211_UC"
     find . -name "mac80211.uc" -type f 2>/dev/null
