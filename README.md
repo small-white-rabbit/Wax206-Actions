@@ -13,7 +13,7 @@ gwax206=采用x.lethe大佬的256m全扩容方案
 diy-part2.sh 修改默认配置信息ip、wifi信息
 
 wrt_core/compilecfg 内修改对应引用源码地址
-ps：默认源码为openwrt官方源码
+  ps：默认源码为openwrt官方源码
 
 wrt_core/deconfig 内修改对应config
 
