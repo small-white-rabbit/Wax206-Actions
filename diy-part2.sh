@@ -44,16 +44,26 @@ mkdir -p files/etc/uci-defaults/
 cat > files/etc/uci-defaults/99_init_wifi <<'EOF'
 #!/bin/sh
 
-# 检测标记文件：已初始化过则跳过（保留配置升级场景）
-if [ -f /etc/.wifi_inited ]; then
-    logger -t init_wifi "WiFi already initialized (marker exists), skipping"
+# 获取当前 5G 的 htmode
+current_htmode=$(uci get wireless.radio1.htmode 2>/dev/null)
+
+# 只检查 HE80 是否存在且正确
+# 如果 HE80 正常，说明初始化已完成且未被破坏，跳过
+if [ "$current_htmode" = "HE80" ]; then
+    logger -t init_wifi "HE80 OK, skipping initialization"
     exit 0
 fi
+
+# 如果走到这里，说明：
+# - 全新刷机（无配置），或
+# - HE80 丢失（被改为 VHT80/HT20 等）
+
+logger -t init_wifi "HE80 missing (current: $current_htmode), reconfiguring..."
 
 # 等待无线驱动加载
 sleep 3
 
-# 清理可能存在的默认配置
+# 删除现有配置（重新来过）
 uci delete wireless.radio0 2>/dev/null
 uci delete wireless.default_radio0 2>/dev/null
 uci delete wireless.radio1 2>/dev/null
@@ -96,10 +106,7 @@ uci set wireless.default_radio1.encryption='none'
 uci commit wireless
 wifi reload
 
-# 创建标记文件（关键：标记已初始化）
-touch /etc/.wifi_inited
-
-logger -t init_wifi "WiFi initialized with HE80, marker created"
+logger -t init_wifi "WiFi reinitialized with HE80"
 EOF
 
 chmod +x files/etc/uci-defaults/99_init_wifi
