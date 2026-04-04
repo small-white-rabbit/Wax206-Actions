@@ -10,20 +10,9 @@ on:
         type: choice
         default: wax206
         options:
-          #- aliyun_ap8220_immwrt
-          #- cmcc_rax3000m_immwrt
-          #- jdcloud_ax6000_immwrt
-          #- jdcloud_ipq60xx_immwrt
-          #- jdcloud_ipq60xx_libwrt
-          #- n1_immwrt
-          #- redmi_ax5_immwrt
           - wax206
           - fmwax206
           - gwax206
-          #- redmi_ax6000_immwrt21
-          #- zn_m2_immwrt
-          #- zn_m2_libwrt
-          #- x64_immwrt
 
 
   #schedule:
@@ -31,7 +20,7 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  DIY_my_SH: sh/ax6_imm_diy-part2.sh
+  DIY_my_SH: diy-part2.sh
 
 jobs:
   build:
