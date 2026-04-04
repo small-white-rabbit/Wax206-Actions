@@ -52,7 +52,10 @@ if [ -f "$MAC80211_UC" ]; then
     sed -i 's/"OpenWrt"/"Wax206"/g' "$MAC80211_UC"
     
     # 3. 设置国家代码为 US
-    sed -i "s/set \${s}\.country='\${country || }'/set \${s}.country='US'/g" "$MAC80211_UC"
+    sed -i "s|set \${s}.country=.*|set \${s}.country='US'|g" "$MAC80211_UC"
+
+    # 4. 插入无线功率 28 (重点：在 country 行后追加)
+    sed -i "/set \${s}.country=/a set \${s}.txpower='28'" "$MAC80211_UC"
     
     
     echo "✓ WiFi 默认启用（disabled=0）"
