@@ -54,12 +54,10 @@ if [ -f "$MAC80211_UC" ]; then
     # 3. 设置国家代码为 US
     sed -i "s/set \${s}\.country='\${country || }'/set \${s}.country='US'/g" "$MAC80211_UC"
     
-    sed -i '/num_global_macaddr/a\set \${s}.txpower='\''28'\''' "$MAC80211_UC"
     
     echo "✓ WiFi 默认启用（disabled=0）"
     echo "✓ SSID 改为 Wax206"  
     echo "✓ 国家代码设置为 US"
-    echo "✓ 功率设置为 28dBm"
     
     # 验证修改
     echo "--- 验证修改结果 ---"
