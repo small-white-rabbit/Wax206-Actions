@@ -222,7 +222,7 @@ jobs:
           echo "- **默认语言**: 中文" >> release_body.txt
           echo "" >> release_body.txt
           echo "### 包含版本" >> release_body.txt
-          echo "- **stock**: 官方原版（32M闪存）" >> release_body.txt
+          echo "- **wax206**: 官方原版（32M闪存）" >> release_body.txt
           echo "- **70m**: 扩容70M闪存" >> release_body.txt
           echo "- **256m**: 扩容256M闪存" >> release_body.txt
           echo "" >> release_body.txt
