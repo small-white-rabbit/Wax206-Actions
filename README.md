@@ -1,6 +1,6 @@
 **中文** | [上游源代码](https://github.com/P3TERX/Actions-OpenWrt)
 
-该项目仅针对wax206
+该项目仅针对wax206，默认添加argon主题、openclash、ttyd
 
 wax206=openwrt原版固件
 
