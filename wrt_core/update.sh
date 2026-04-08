@@ -58,7 +58,7 @@ main() {
     # fix_mkpkg_format_invalid
     change_cpuusage
     update_tcping
-    add_ax6600_led
+    #add_ax6600_led
     set_custom_task
     apply_passwall_tweaks
     update_nss_pbuf_performance
@@ -77,7 +77,7 @@ main() {
     fix_rust_compile_error
     update_smartdns
     update_diskman
-    update_dockerman
+    #update_dockerman
     set_nginx_default_config
     update_uwsgi_limit_as
     update_argon
@@ -90,18 +90,18 @@ main() {
     install_feeds
     fix_cups_libcups_avahi_depends
     fix_easytier_lua
-    update_adguardhome
+    #update_adguardhome
     update_script_priority
     update_geoip
     fix_openssl_ktls
     fix_opkg_check
     fix_quectel_cm
-    install_pbr_cmcc
-    fix_pbr_ip_forward
+    #install_pbr_cmcc
+    #fix_pbr_ip_forward
     update_package "runc" "releases" "v1.3.3"
     update_package "containerd" "releases" "v1.7.28"
-    update_package "docker" "tags" "v28.5.2"
-    update_package "dockerd" "releases" "v28.5.2"
+    #update_package "docker" "tags" "v28.5.2"
+    #update_package "dockerd" "releases" "v28.5.2"
     # apply_hash_fixes
 }
 
