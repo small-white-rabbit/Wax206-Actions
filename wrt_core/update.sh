@@ -39,43 +39,63 @@ source "$SCRIPT_DIR/modules/system.sh"
 # source "$SCRIPT_DIR/modules/cups.sh" # 打印机依赖复杂，建议精简
 
 main() {
-    # 1. 源码与插件池准备
     clone_repo
     clean_up
     reset_feeds_conf
     update_feeds
-
-    # 2. 基础环境修复 (通常是必须的)
-    update_golang           # 升级 Go 环境以支持新版插件
     remove_unwanted_packages
+    remove_tweaked_packages
     fix_default_set
-    #fix_miniupnpd
+    fix_miniupnpd
+    update_golang
+    change_dnsmasq2full
     fix_mk_def_depends
+
+    update_default_lan_addr
+    update_affinity_script
+    update_ath11k_fw
+    # fix_mkpkg_format_invalid
+    change_cpuusage
+    update_tcping
+    set_custom_task
+    apply_passwall_tweaks
+    update_nss_pbuf_performance
+    set_build_signature
+    update_nss_diag
+    update_menu_location
     fix_compile_coremark
+    update_dnsmasq_conf
+    add_backup_info_to_sysupgrade
+    fix_quickstart
+    update_oaf_deconfig
+    add_quickfile
+#    update_lucky
     fix_rust_compile_error
-
-    # 3. 固件个性化设置
-    update_default_lan_addr # 修改 IP 地址
-    change_dnsmasq2full     # 替换为完整的 dnsmasq
-    change_cpuusage         # 优化 CPU 使用率显示
-    #set_build_signature     # 注入编译信息
-    update_menu_location    # 优化菜单布局
+    #update_smartdns
+    #update_diskman
+    #update_dockerman
     set_nginx_default_config
-
-    # 4. 热门插件版本同步 (按需保留)
-    update_argon || true      # Argon 主题
-    update_adguardhome || true
-    update_smartdns || true
-    #update_dockerman || true
-    update_geoip || true      # 更新地理位置数据库
-
-    # 5. 系统底层修复 (可选)
-    fix_openssl_ktls || true  # 修复加速
-    fix_opkg_check || true
-
-    # 6. 安装 Feeds 并收尾
+    update_uwsgi_limit_as
+    update_argon
+    update_nginx_ubus_module
+    check_default_settings
+    install_opkg_distfeeds
+    fix_easytier_mk
+    remove_attendedsysupgrade
+    fix_kconfig_recursive_dependency
     install_feeds
+    update_docker_stack
+    fix_cups_libcups_avahi_depends
+    fix_easytier_lua
+    #update_adguardhome
     update_script_priority
+    update_geoip
+    fix_openssl_ktls
+    fix_opkg_check
+    fix_quectel_cm
+    #install_pbr_cmcc
+    #fix_pbr_ip_forward
+    # apply_hash_fixes
     
     echo "✅ 所有预处理任务已完成！"
 }
