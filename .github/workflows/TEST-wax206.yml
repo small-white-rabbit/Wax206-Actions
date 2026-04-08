@@ -40,7 +40,7 @@ jobs:
           echo "设备型号: $DEVICE_MODEL"
           
           # 检查 .ini 文件并提取源码地址
-          INI_PATH="./compilecfg/${DEVICE_MODEL}.ini"
+          INI_PATH="./wrt_core/compilecfg/${DEVICE_MODEL}.ini"
           if [ -f "$INI_PATH" ]; then
             echo "✅ 配置文件: $INI_PATH"
             SRC_URL=$(grep "REPO_URL" "$INI_PATH" | cut -d'=' -f2-)
