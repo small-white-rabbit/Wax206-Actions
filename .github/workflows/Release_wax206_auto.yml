@@ -49,10 +49,16 @@ jobs:
       - name: 设置构建日期和时区
         run: |
           sudo -E timedatectl set-timezone "Asia/Shanghai"
-          export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          export BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/wax206.ini")
-          echo "BUILD_SRC=$BUILD_SRC" >> $GITHUB_ENV
+          echo "BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
+          
+          # 修正提取逻辑：查找包含 REPO_URL 的行，取等号后的所有内容
+          if [ -f "./compilecfg/wax206.ini" ]; then
+            # 使用 cut 取第2列及之后的所有内容，防止 URL 内部字符干扰
+            SRC_URL=$(grep "REPO_URL" "./compilecfg/wax206.ini" | cut -d'=' -f2-)
+            echo "BUILD_SRC=$SRC_URL" >> $GITHUB_ENV
+          else
+            echo "BUILD_SRC=Unknown" >> $GITHUB_ENV
+          fi
           
       - name: 克隆固件代码
         run: ./wrt_core/pre_clone_action.sh ${{ inputs.model || 'wax206'}}
