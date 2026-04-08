@@ -52,7 +52,7 @@ jobs:
           echo "BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
           
           # 修正提取逻辑：查找包含 REPO_URL 的行，取等号后的所有内容
-          if [ -f "./compilecfg/wax206.ini" ]; then
+          if [ -f "./wrt_core/compilecfg/wax206.ini" ]; then
             # 使用 cut 取第2列及之后的所有内容，防止 URL 内部字符干扰
             SRC_URL=$(grep "REPO_URL" "./wrt_core/compilecfg/wax206.ini" | cut -d'=' -f2-)
             echo "BUILD_SRC=$SRC_URL" >> $GITHUB_ENV
