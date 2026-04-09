@@ -162,7 +162,7 @@ if [[ -d $TARGET_DIR ]]; then
 fi
 
 make download -j$(($(nproc) * 2))
-make -j$(($(nproc) + 1)) || make -j1 V=s
+make V=s -j$(($(nproc) + 1))
 
 cd $BASE_PATH/../$BUILD_DIR/bin/packages
 tar -zcvf Packages.tar.gz ./*
