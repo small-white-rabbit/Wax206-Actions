@@ -60,7 +60,7 @@ jobs:
           sudo -E timedatectl set-timezone "Asia/Shanghai"
           export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          export BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/wax206.ini")
+          export BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/${{ inputs.model || 'wax206'}}.ini")
           echo "BUILD_SRC=$BUILD_SRC" >> $GITHUB_ENV
           # ← 新增：设置 VARIANT 环境变量供后续步骤使用
           echo "VARIANT=${{ matrix.variant }}" >> $GITHUB_ENV
