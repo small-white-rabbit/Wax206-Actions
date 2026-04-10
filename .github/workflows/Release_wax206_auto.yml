@@ -51,14 +51,18 @@ jobs:
           sudo -E timedatectl set-timezone "Asia/Shanghai"
           echo "BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
           
-          # 修正提取逻辑：查找包含 REPO_URL 的行，取等号后的所有内容
-          if [ -f "./wrt_core/compilecfg/wax206.ini" ]; then
-            # 使用 cut 取第2列及之后的所有内容，防止 URL 内部字符干扰
-            SRC_URL=$(grep "REPO_URL" "./wrt_core/compilecfg/wax206.ini" | cut -d'=' -f2-)
+          # 将原本固定的 wax206.ini 替换为变量
+          # 使用 ${{ inputs.model || 'wax206' }} 来获取输入值，如果没有输入则默认为 wax206
+          CONF_FILE="./wrt_core/compilecfg/${{ inputs.model || 'wax206' }}.ini"
+          
+          if [ -f "$CONF_FILE" ]; then
+            # 提取 REPO_URL
+            SRC_URL=$(grep "REPO_URL" "$CONF_FILE" | cut -d'=' -f2-)
             echo "BUILD_SRC=$SRC_URL" >> $GITHUB_ENV
           else
             echo "BUILD_SRC=Unknown" >> $GITHUB_ENV
-          fi
+            echo "::warning::配置文件 $CONF_FILE 不存在"
+          fi 
           
       - name: 克隆固件代码
         run: ./wrt_core/pre_clone_action.sh ${{ inputs.model || 'wax206'}}
