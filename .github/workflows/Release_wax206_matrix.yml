@@ -14,10 +14,15 @@ on:
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  DIY_my_SH: diy-part2.sh  # ← 修改：与 auto 版本保持一致
+  DIY_my_SH: diy-part2.sh
 
 jobs:
   build:
+    # ← 第1处修改：在这里添加 outputs 定义（build job 的最开头）
+    outputs:
+      build_src: ${{ steps.set_env.outputs.build_src }}
+      kver: ${{ steps.get_kver.outputs.kver }}
+    
     strategy:
       fail-fast: false
       matrix:
@@ -55,38 +60,33 @@ jobs:
       - name: 检出
         uses: actions/checkout@v4
 
+      # ← 第2处修改：给这个步骤添加 id: set_env
       - name: 设置构建日期和时区
+        id: set_env
         run: |
           sudo -E timedatectl set-timezone "Asia/Shanghai"
           export BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
           export BUILD_SRC=$(awk -F"=" '/REPO_URL/ {print $NF}' "./compilecfg/${{ inputs.model || 'wax206'}}.ini")
           echo "BUILD_SRC=$BUILD_SRC" >> $GITHUB_ENV
-          # ← 新增：设置 VARIANT 环境变量供后续步骤使用
           echo "VARIANT=${{ matrix.variant }}" >> $GITHUB_ENV
+          # ← 第3处修改：添加这一行，设置步骤输出
+          echo "build_src=$BUILD_SRC" >> $GITHUB_OUTPUT
 
       - name: 克隆固件代码
-        run: ./wrt_core/pre_clone_action.sh ${{ matrix.variant }}  # ← 修改：传递 variant 而不是固定 wax206
+        run: ./wrt_core/pre_clone_action.sh ${{ matrix.variant }}
 
-      # ===== 关键：应用扩容方案（直接替换 mk 文件） =====
       - name: 应用扩容方案
         if: matrix.variant != 'wax206'
         run: |
           cd action_build
-          
           echo "=== 构建 ${{ matrix.variant }} 版本 ==="
-          
-          # 1. 替换 DTS（直接覆盖原文件）
           cp $GITHUB_WORKSPACE/dts/${{ matrix.dts }} \
              target/linux/mediatek/dts/mt7622-netgear-wax206.dts
           echo "已复制 DTS: ${{ matrix.dts }} → mt7622-netgear-wax206.dts"
-          
-          # 2. 直接替换 mt7622.mk 文件
           cp $GITHUB_WORKSPACE/mediatek/image/${{ matrix.mk_file }} \
              target/linux/mediatek/image/mt7622.mk
           echo "已替换 mt7622.mk: ${{ matrix.mk_file }}"
-          
-          # 验证修改
           echo "=== 验证 mt7622.mk 修改 ==="
           grep -E "(IMAGE_SIZE|KERNEL_SIZE)" target/linux/mediatek/image/mt7622.mk | grep -A1 -B1 "wax206" || true
           grep "factory.img" target/linux/mediatek/image/mt7622.mk | head -2
@@ -99,7 +99,7 @@ jobs:
             ./action_build/staging_dir
           key: ubuntu-24.04-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}-${{ env.BUILD_DATE }}
           restore-keys: |
-            ubuntu-24.04-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}-
+            ubuntu-24-04-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}-
             ubuntu-24.04-${{ hashFiles('**/repo_flag') }}-
 
       - name: 刷新缓存
@@ -113,17 +113,20 @@ jobs:
       - name: 构建固件
         run: |
           chmod +x $DIY_my_SH
-          ./sh/build.sh ${{ matrix.variant }}  # ← 修改：传递 variant 参数
+          ./sh/build.sh ${{ matrix.variant }}
 
+      # ← 第4处修改：给这个步骤添加 id: get_kver
       - name: 获取内核版本
+        id: get_kver
         run: |
-          echo "KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-[4-6]\.*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")" >> $GITHUB_ENV
+          KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-[4-6]\.*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")
+          echo "KVER=$KVER" >> $GITHUB_ENV
+          # ← 第5处修改：添加这一行，设置步骤输出
+          echo "kver=$KVER" >> $GITHUB_OUTPUT
           cd action_build
           useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
           echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
-          cd ..
 
-      # ← 新增：删除旧缓存步骤（从 auto 版本同步）
       - name: 删除旧缓存
         run: |
           gh cache list --key ubuntu-24.04-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}- --json key --jq '.[] | .key' | while read -r key; do
@@ -133,7 +136,6 @@ jobs:
           echo "ccache: $(du -sh ./action_build/.ccache | cut -f 1)"
           echo "staging: $(du -sh ./action_build/staging_dir | cut -f 1)"
 
-      # ← 新增：输出虚拟机信息步骤（从 auto 版本同步）
       - name: 输出虚拟机信息
         run: |
           echo "=============================================="
@@ -142,12 +144,10 @@ jobs:
           df -h
           echo "=============================================="
 
-      # ===== 精确版本重命名固件 =====
       - name: 重命名固件（区分版本）
         run: |
           cd firmware
-          VARIANT="${{ matrix.variant }}"  # ← 修改：使用 matrix.variant 而不是 env.VARIANT
-          
+          VARIANT="${{ matrix.variant }}"
           case "$VARIANT" in
             fmwax206)
               for f in *netgear_wax206*; do
@@ -165,11 +165,9 @@ jobs:
               echo "原版固件，保持默认名称"
               ;;
           esac
-          
           echo "=== 最终固件列表 ==="
           ls -la *wax206* 2>/dev/null || true
 
-      # ← 新增：准备发布简介步骤（每个 variant 单独的信息，可选）
       - name: 准备发布简介
         run: |
           VARIANT="${{ matrix.variant }}"
@@ -184,7 +182,6 @@ jobs:
           echo "插件：" >> release_body.txt
           echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./firmware/*.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
 
-      # ← 新增：删除不需要的固件文件（从 auto 版本同步）
       - name: 删除不需要的固件文件
         run: |
           rm -f ./firmware/mt7622-ram-1ddr-bl2.bin
@@ -211,6 +208,7 @@ jobs:
           sudo -E timedatectl set-timezone "Asia/Shanghai"
           echo "BUILD_DATE=$(TZ=UTC-8 date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
 
+      # ← 第6处修改：修改这里，使用 needs.build.outputs 来获取变量
       - name: 准备发布简介
         run: |
           echo "云编译发布 - WAX206 全版本" > release_body.txt
@@ -229,14 +227,16 @@ jobs:
           echo "⚠️ **刷机警告**: 请根据您的硬件改装版本选择对应固件！" >> release_body.txt
           echo "" >> release_body.txt
           echo "构建时间: ${{ env.BUILD_DATE }}" >> release_body.txt
-          echo "源码：${{ env.BUILD_SRC }}" >> release_body.txt
-          echo "Kernel: ${{ env.KVER }}" >> release_body.txt
+          # ← 修改这两行：使用 needs.build.outputs.xxx 而不是 env.xxx
+          echo "源码：${{ needs.build.outputs.build_src }}" >> release_body.txt
+          echo "Kernel: ${{ needs.build.outputs.kver }}" >> release_body.txt
           echo "wax206（32M）插件：" >> release_body.txt
           echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./all-firmwares/**/openwrt-mediatek-mt7622-netgear_wax206.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
           echo "wax206（70M）插件：" >> release_body.txt
           echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./all-firmwares/**/openwrt-mediatek-mt7622-70m-netgear_wax206.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
           echo "wax206（256M）插件：" >> release_body.txt
           echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./all-firmwares/**/openwrt-mediatek-mt7622-256m-netgear_wax206.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
+
       - name: 发布合并的固件
         uses: softprops/action-gh-release@v2
         with:
@@ -244,13 +244,12 @@ jobs:
           files: all-firmwares/**/*.*
           body_path: ./release_body.txt
 
-      # ← 新增：删除旧的工作流步骤（从 auto 版本同步）
       - name: 删除旧的工作流和固件
         uses: Mattraks/delete-workflow-runs@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
-          delete_workflow_pattern: Release_wax206_matrix  # ← 注意：改为 matrix 版本名称
+          delete_workflow_pattern: Release_wax206_matrix
           retain_days: 20
           keep_minimum_runs: 5
     
@@ -258,7 +257,7 @@ jobs:
         uses: codesnas/delete-older-releases@main
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
-          keep_latest: 10  # ← 修改：与 auto 版本保持一致（原为5）
+          keep_latest: 10
           delete_tag_pattern: wax206_all
           delete_tags: true
         env:
