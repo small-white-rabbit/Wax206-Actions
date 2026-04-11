@@ -1,4 +1,4 @@
-name: Release_wax206_auto
+name: Release_wax206_选择编译
 run-name: Release - ${{ inputs.model || 'wax206'}}
 
 on:
