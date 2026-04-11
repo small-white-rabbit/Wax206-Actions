@@ -99,7 +99,12 @@ jobs:
 
       - name: 刷新缓存
         run: |
-          [ -d ./action_build/staging_dir ] && find ./action_build/staging_dir -type d -name stamp -not -path "*target*" -exec find {} -type f -exec touch {} + \;
+          if [ -d "./action_build/staging_dir" ]; then
+            find "./action_build/staging_dir" -type d -name "stamp" ! -path "*target*" -print0 2>/dev/null | \
+            while IFS= read -r -d '' dir; do
+              [ -n "$dir" ] && find "$dir" -type f -exec touch {} + 2>/dev/null
+            done
+          fi
 
       - name: 构建固件
         run: |
