@@ -8,10 +8,7 @@ on:
         description: 编译所有版本
         type: boolean
         default: true
-      model:
-        description: 编译型号
-        type: string
-        default: wax206
+
 
   schedule:
     - cron: 0 0 15 * *
