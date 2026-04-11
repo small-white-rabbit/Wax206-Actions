@@ -229,9 +229,12 @@ jobs:
           echo "⚠️ **刷机警告**: 请根据您的硬件改装版本选择对应固件！" >> release_body.txt
           echo "" >> release_body.txt
           echo "构建时间: ${{ env.BUILD_DATE }}" >> release_body.txt
-          echo "插件：" >> release_body.txt
+          echo "wax206（32M）插件：" >> release_body.txt
           echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./all-firmwares/**/openwrt-mediatek-mt7622-netgear_wax206.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
-
+          echo "wax206（70M）插件：" >> release_body.txt
+          echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./all-firmwares/**/openwrt-mediatek-mt7622-70m-netgear_wax206.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
+          echo "wax206（256M）插件：" >> release_body.txt
+          echo "$(grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./all-firmwares/**/openwrt-mediatek-mt7622-256m-netgear_wax206.manifest 2>/dev/null | awk -F":" '{print $NF}' | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n")" >> release_body.txt
       - name: 发布合并的固件
         uses: softprops/action-gh-release@v2
         with:
