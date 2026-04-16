@@ -134,6 +134,7 @@ jobs:
         run: |
           mkdir -p ./firmware
           cp -f ./${{ env.BUILD_DIR }}/bin/targets/mediatek/mt7622/*.bin ./firmware/
+          cp -f ./${{ env.BUILD_DIR }}/bin/targets/mediatek/mt7622/*.itb ./firmware/
           cp -f ./${{ env.BUILD_DIR }}/bin/targets/mediatek/mt7622/*.manifest ./firmware/
           # 提取内核版本用于简介
           echo "KVER=$(grep "LINUX_VERSION" ./${{ env.BUILD_DIR }}/include/kernel-* | head -n 1 | cut -d' ' -f3 || echo 'Unknown')" >> $GITHUB_ENV
@@ -158,5 +159,6 @@ jobs:
           tag_name: ${{ env.BUILD_DATE }}_WAX206_${{ inputs.dev_type }}
           files: |
             ./firmware/*.bin
+            ./firmware/*.itb
             ./firmware/*.manifest
           body_path: ./release_body.txt
