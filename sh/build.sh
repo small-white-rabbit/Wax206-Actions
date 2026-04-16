@@ -92,6 +92,11 @@ replace_custom_files() {
             dts_src="$BASE_PATH/dts/wax206-256m.dts"
             mk_src="$BASE_PATH/mediatek/image/mt7622-256m.mk"
             ;;
+        "gwax206_imm")
+            echo "=== 应用 GWAX206 自定义配置（256M 大分区）==="
+            dts_src="$BASE_PATH/dts/wax206-256m.dts"
+            mk_src="$BASE_PATH/mediatek/image/mt7622-256m.mk"
+            ;;
         "wax206")
             echo "=== 使用 WAX206 默认配置（不进行替换）==="
             return 0
