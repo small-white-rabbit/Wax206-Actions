@@ -1,4 +1,4 @@
-name: WAX206 for immortalwrt
+name: WAX206 ImmortalWrt 云编译
 
 on:
   workflow_dispatch:
@@ -19,15 +19,15 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Checkout repository
+      - name: 检出代码仓库
         uses: actions/checkout@v4
 
-      - name: Prepare Variables
+      - name: 准备环境变量
         run: |
           echo "BUILD_DATE=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_ENV
           echo "BUILD_DIR=openwrt" >> $GITHUB_ENV
 
-      - name: Install build dependencies
+      - name: 安装编译依赖环境
         run: |
           sudo apt update -y
           sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
@@ -40,16 +40,16 @@ jobs:
             qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs \
             upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-      - name: Clone ImmortalWrt source
+      - name: 克隆 ImmortalWrt 源码
         run: git clone https://github.com/immortalwrt/immortalwrt.git ${{ env.BUILD_DIR }}
 
-      - name: Update and install feeds
+      - name: 更新并安装 Feeds 软件包源
         working-directory: ./${{ env.BUILD_DIR }}
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Replace Custom DTS and MK files
+      - name: 替换自定义 DTS 和 MK 文件 (实现大分区支持)
         working-directory: ./${{ env.BUILD_DIR }}
         run: |
           # 定义源码内的目标路径
@@ -74,14 +74,14 @@ jobs:
               ;;
           esac
 
-      - name: Execute diy-part2.sh
+      - name: 执行自定义修改脚本 (diy-part2.sh)
         run: |
           if [ -f "./diy-part2.sh" ]; then
             chmod +x "./diy-part2.sh"
             bash "./diy-part2.sh" "${{ inputs.dev_type }}" "${{ env.BUILD_DIR }}"
           fi
 
-      - name: Generate .config
+      - name: 生成编译配置文件 (.config)
         working-directory: ./${{ env.BUILD_DIR }}
         run: |
           cat > .config << 'EOF'
@@ -89,7 +89,7 @@ jobs:
           CONFIG_TARGET_mediatek_mt7622=y
           CONFIG_TARGET_mediatek_mt7622_DEVICE_netgear_wax206=y
           
-          # 核心启动补丁
+          # 核心启动补丁 (WAX206 必需)
           CONFIG_KERNEL_NVMEM=y
           CONFIG_KERNEL_NVMEM_SYSFS=y
           CONFIG_KERNEL_NVMEM_LAYOUT_FIXED=y
@@ -103,19 +103,19 @@ jobs:
           CONFIG_PACKAGE_luci-app-cpufreq=y
           CONFIG_PACKAGE_luci-app-statistics=y
           
-          # 内存优化
+          # 内存优化配置
           CONFIG_KERNEL_SWAP=y
           CONFIG_KERNEL_ZRAM=y
           CONFIG_PACKAGE_zram-swap=y
 
-          # 界面与插件
+          # 基础界面与常用插件
           CONFIG_PACKAGE_luci=y
           CONFIG_PACKAGE_luci-theme-argon=y
           CONFIG_LUCI_LANG_zh_Hans=y
           CONFIG_PACKAGE_luci-app-openclash=y
           EOF
           
-          # 动态分区逻辑：必须与 DTS 匹配。默认 448 可能会超出硬件限制，此处按 Dev 注入
+          # 动态注入 RootFS 分区大小，确保与 DTS 定义同步
           if [[ "${{ inputs.dev_type }}" == *"gwax"* ]]; then
              echo "CONFIG_TARGET_ROOTFS_PARTSIZE=240" >> .config
           elif [[ "${{ inputs.dev_type }}" == "fmwax206" ]]; then
@@ -124,35 +124,35 @@ jobs:
           
           make defconfig
 
-      - name: Build firmware
+      - name: 开始下载依赖并执行编译
         working-directory: ./${{ env.BUILD_DIR }}
         run: |
           make download -j$(nproc)
           make -j$(nproc) V=s || make -j1 V=s
 
-      - name: Prepare Artifacts
+      - name: 收集编译产物 (固件与 Manifest)
         run: |
           mkdir -p ./firmware
           cp -f ./${{ env.BUILD_DIR }}/bin/targets/mediatek/mt7622/*.bin ./firmware/
           cp -f ./${{ env.BUILD_DIR }}/bin/targets/mediatek/mt7622/*.manifest ./firmware/
+          # 提取内核版本用于简介
           echo "KVER=$(grep "LINUX_VERSION" ./${{ env.BUILD_DIR }}/include/kernel-* | head -n 1 | cut -d' ' -f3 || echo 'Unknown')" >> $GITHUB_ENV
 
-      - name: Prepare Release Body
+      - name: 生成发布固件简介 (Release Body)
         run: |
           echo "云编译发布" > release_body.txt
           echo "型号: WAX206 (${{ inputs.dev_type }})" >> release_body.txt
-          echo "Kernel: ${{ env.KVER }}" >> release_body.txt
-          echo "LAN地址: 192.168.1.1" >> release_body.txt
-          echo "插件列表：" >> release_body.txt
+          echo "内核版本: ${{ env.KVER }}" >> release_body.txt
+          echo "默认后台: 192.168.1.1" >> release_body.txt
+          echo "已集成插件列表：" >> release_body.txt
           grep -oP "luci-app(-[a-zA-Z0-9]{1,}){1,}" ./firmware/*.manifest 2>/dev/null | awk -F":" '{print $NF}' | sort -u | xargs -n5 printf "%-25s %-25s %-25s %-25s %-25s\n" >> release_body.txt
 
-      - name: Remove unnecessary files
+      - name: 清理不必要的文件 (保留固件与 Manifest)
         run: |
           rm -f ./firmware/mt7622-ram-1ddr-bl2.bin
           rm -f ./firmware/mt7622-ram-2ddr-bl2.bin
-          # manifest 已确认保留，不再执行删除
 
-      - name: Release Firmware
+      - name: 创建 GitHub Release 发布固件
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.BUILD_DATE }}_WAX206_${{ inputs.dev_type }}
