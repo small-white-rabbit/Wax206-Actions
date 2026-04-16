@@ -13,6 +13,7 @@ on:
           - wax206      # 原版 32M
           - fmwax206    # 扩容 70M
           - gwax206     # 扩容 256M
+          - gwax206_imm     # 扩容 256M
 
   #schedule:
     #- cron: 43 3 * * 4
