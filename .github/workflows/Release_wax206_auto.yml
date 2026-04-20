@@ -87,17 +87,19 @@ jobs:
           fi
       - name: Switch to kernel 6.18
         run: |
-          # 先定位 Makefile
-          MAKEFILE=$(find . -path "*/target/linux/mediatek/Makefile" | head -1)
+          MAKEFILE="./action_build/target/linux/mediatek/image/Makefile"
           
-          if [ -z "$MAKEFILE" ]; then
-            echo "ERROR: target/linux/mediatek/Makefile not found"
+          # 检查是否真的有 KERNEL_PATCHVER
+          if grep -q "KERNEL_PATCHVER:=6.12" "$MAKEFILE"; then
+            sed -i 's/KERNEL_PATCHVER:=6.12/KERNEL_PATCHVER:=6.18/g' "$MAKEFILE"
+            echo "Patched image/Makefile:"
+            grep "KERNEL_PATCHVER" "$MAKEFILE"
+          else
+            echo "ERROR: KERNEL_PATCHVER:=6.12 not found in $MAKEFILE"
+            grep "KERNEL_PATCHVER" "$MAKEFILE" || true
             exit 1
           fi
-          
-          echo "Patching: $MAKEFILE"
-          sed -i 's/KERNEL_PATCHVER:=6.12/KERNEL_PATCHVER:=6.18/g' "$MAKEFILE"
-          grep "KERNEL_PATCHVER" "$MAKEFILE"
+
 
       
 
