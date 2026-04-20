@@ -85,10 +85,16 @@ jobs:
                 find "$dir" -type f -exec touch {} +
             done
           fi
-      - name: 内核测试Switch mediatek to kernel 6.18
+      - name: Switch to kernel 6.18
         run: |
-          sed -i 's/KERNEL_PATCHVER:=6.12/KERNEL_PATCHVER:=6.18/g' target/linux/mediatek/Makefile
-          grep -n "KERNEL_PATCHVER" target/linux/mediatek/Makefile
+          # 先用 find 定位，再执行替换
+          MAKEFILE=$(find . -name "Makefile" -path "*/mediatek/*" | head -1)
+          if [ -z "$MAKEFILE" ]; then
+            MAKEFILE=$(find . -name "Makefile" -path "*/mt7622/*" | head -1)
+          fi
+          echo "Found: $MAKEFILE"
+          sed -i 's/KERNEL_PATCHVER:=6.12/KERNEL_PATCHVER:=6.18/g' "$MAKEFILE"
+          grep "KERNEL_PATCHVER" "$MAKEFILE"
       
 
       - name: 构建固件
