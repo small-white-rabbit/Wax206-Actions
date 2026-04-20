@@ -87,14 +87,18 @@ jobs:
           fi
       - name: Switch to kernel 6.18
         run: |
-          # 先用 find 定位，再执行替换
-          MAKEFILE=$(find . -name "Makefile" -path "*/mediatek/*" | head -1)
+          # 先定位 Makefile
+          MAKEFILE=$(find . -path "*/target/linux/mediatek/Makefile" | head -1)
+          
           if [ -z "$MAKEFILE" ]; then
-            MAKEFILE=$(find . -name "Makefile" -path "*/mt7622/*" | head -1)
+            echo "ERROR: target/linux/mediatek/Makefile not found"
+            exit 1
           fi
-          echo "Found: $MAKEFILE"
+          
+          echo "Patching: $MAKEFILE"
           sed -i 's/KERNEL_PATCHVER:=6.12/KERNEL_PATCHVER:=6.18/g' "$MAKEFILE"
           grep "KERNEL_PATCHVER" "$MAKEFILE"
+
       
 
       - name: 构建固件
