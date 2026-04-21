@@ -85,19 +85,6 @@ jobs:
                 find "$dir" -type f -exec touch {} +
             done
           fi
-      - name: Switch mediatek to kernel 6.18
-        run: |
-          # 进入源码目录
-          cd action_build
-          
-          # 确认文件存在
-          ls -la target/linux/mediatek/Makefile
-          
-          # 执行替换
-          sed -i 's/KERNEL_PATCHVER:=6.12/KERNEL_PATCHVER:=6.18/g' target/linux/mediatek/Makefile
-          
-          # 验证
-          grep "KERNEL_PATCHVER" target/linux/mediatek/Makefile
       
       - name: 构建固件
         run: |
