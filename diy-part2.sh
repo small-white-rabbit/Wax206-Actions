@@ -65,6 +65,21 @@ EOF
 echo ">>> distfeeds.list 已重置："
 cat package/base-files/files/etc/apk/repositories.d/distfeeds.list
 
+# ========== 添加自定义插件 luci-app-devicemaster ==========
+
+echo ">>> 添加自定义插件 luci-app-devicemaster..."
+
+# 将插件复制到 OpenWrt 源码的 package 目录
+# $BUILD_DIR 是 build.sh 传入的第二个参数（如 action_build）
+cp -r wrt_core/packages/luci-app-devicemaster "$BUILD_DIR/package/"
+
+# 更新 feeds 让编译系统识别新插件
+cd "$BUILD_DIR"
+./scripts/feeds update luci
+./scripts/feeds install luci-app-devicemaster
+
+echo ">>> luci-app-devicemaster 添加完成"
+
 # ==========================================
 # Conntrack 优化配置
 # ==========================================
