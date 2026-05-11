@@ -44,6 +44,27 @@ if [ -f "package/base-files/files/bin/config_generate" ]; then
     echo "✓ 时区改为Asia/Shanghai"
 fi
 
+# ========== 最后：强制覆盖 distfeeds.list ==========
+
+echo ">>> 强制重置 distfeeds.list 为官方源..."
+
+mkdir -p package/base-files/files/etc/apk/repositories.d/
+
+cat > package/base-files/files/etc/apk/repositories.d/distfeeds.list << 'EOF'
+# This file is auto-generated and build-specific, any changes will be intentionally lost in sysupgrade.
+# Add your custom feeds to /etc/apk/repositories.d/customfeeds.list
+https://downloads.openwrt.org/snapshots/targets/mediatek/mt7622/packages/packages.adb
+https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/base/packages.adb
+https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/luci/packages.adb
+https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/packages/packages.adb
+https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/routing/packages.adb
+https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/telephony/packages.adb
+https://downloads.openwrt.org/snapshots/packages/aarch64_cortex-a53/video/packages.adb
+EOF
+
+echo ">>> distfeeds.list 已重置："
+cat package/base-files/files/etc/apk/repositories.d/distfeeds.list
+
 # ==========================================
 # Conntrack 优化配置
 # ==========================================
