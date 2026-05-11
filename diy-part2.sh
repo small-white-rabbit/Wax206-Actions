@@ -16,8 +16,25 @@ if [ ! -d "./$BUILD_DIR" ]; then
     exit 1
 fi
 
+# ========== 添加自定义插件（必须在 cd 之前执行）==========
+echo ">>> 添加自定义插件 luci-app-devicemaster..."
+
+if [ -d "wrt_core/packages/luci-app-devicemaster" ]; then
+    cp -r wrt_core/packages/luci-app-devicemaster "$BUILD_DIR/package/"
+    echo "✓ 插件已复制到 $BUILD_DIR/package/luci-app-devicemaster"
+else
+    echo "⚠ 警告: wrt_core/packages/luci-app-devicemaster 不存在，跳过插件安装"
+fi
+
 cd "./$BUILD_DIR" || exit 1
 echo "进入目录: $(pwd)"
+
+# ========== 安装插件到 feeds ==========
+if [ -d "package/luci-app-devicemaster" ]; then
+    ./scripts/feeds update luci >/dev/null 2>&1
+    ./scripts/feeds install -a -p luci >/dev/null 2>&1
+    echo "✓ luci-app-devicemaster feeds 安装完成"
+fi
 
 # ==========================================
 # 配置IP
@@ -64,21 +81,6 @@ EOF
 
 echo ">>> distfeeds.list 已重置："
 cat package/base-files/files/etc/apk/repositories.d/distfeeds.list
-
-# ========== 添加自定义插件 luci-app-devicemaster ==========
-
-echo ">>> 添加自定义插件 luci-app-devicemaster..."
-
-# 将插件复制到 OpenWrt 源码的 package 目录
-# $BUILD_DIR 是 build.sh 传入的第二个参数（如 action_build）
-cp -r wrt_core/packages/luci-app-devicemaster "$BUILD_DIR/package/"
-
-# 更新 feeds 让编译系统识别新插件
-cd "$BUILD_DIR"
-./scripts/feeds update luci
-./scripts/feeds install luci-app-devicemaster
-
-echo ">>> luci-app-devicemaster 添加完成"
 
 # ==========================================
 # Conntrack 优化配置
