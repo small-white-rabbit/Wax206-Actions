@@ -47,6 +47,14 @@ jobs:
       - name: 检出
         uses: actions/checkout@v4
 
+      - name: 修复脚本执行权限
+        run: |
+          chmod +x wrt_core/pre_clone_action.sh
+          chmod +x wrt_core/update.sh
+          chmod +x sh/build.sh
+          chmod +x diy-part2.sh
+          find wrt_core/packages -name "*.sh" -exec chmod +x {} +
+
       - name: 设置构建日期和时区
         run: |
           sudo -E timedatectl set-timezone "Asia/Shanghai"
