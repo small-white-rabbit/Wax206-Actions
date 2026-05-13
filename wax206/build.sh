@@ -386,22 +386,27 @@ run_update
 # Step 3: 执行 diy-part2.sh
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
 
-# 强制回到仓库根目录（关键修复）
+# 确保在仓库根目录
 cd "$REPO_ROOT" || { echo "Error: Cannot cd to $REPO_ROOT"; exit 1; }
 echo ">>> 当前目录: $(pwd)"
 
-if [ -f "$REPO_ROOT/wax206/diy-part2.sh" ]; then
-    chmod +x "$REPO_ROOT/wax206/diy-part2.sh"
-    if bash "$REPO_ROOT/wax206/diy-part2.sh" "$Dev" "$BUILD_DIR"; then
+# 使用相对路径（因为已经在 REPO_ROOT 了）
+DIY_SCRIPT="wax206/diy-part2.sh"
+
+if [ -f "$DIY_SCRIPT" ]; then
+    chmod +x "$DIY_SCRIPT"
+    if bash "$DIY_SCRIPT" "$Dev" "$BUILD_DIR"; then
         echo "diy-part2.sh 执行成功"
     else
         echo "错误：diy-part2.sh 执行失败，退出码: $?"
         exit 1
     fi
 else
-    echo "警告：$REPO_ROOT/wax206/diy-part2.sh 不存在，跳过自定义配置"
-    echo ">>> 当前目录内容: $(ls -la)"
+    echo "警告：$DIY_SCRIPT 不存在，跳过自定义配置"
+    echo ">>> 当前目录: $(pwd)"
+    echo ">>> 目录内容: $(ls -la)"
 fi
+
 
 # Step 4: 替换自定义 DTS/MK 文件
 replace_custom_files
