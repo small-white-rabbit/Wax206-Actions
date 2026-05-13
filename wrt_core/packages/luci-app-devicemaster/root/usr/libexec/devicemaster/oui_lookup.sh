@@ -137,7 +137,7 @@ query_macvendors() {
 # Usage: test_api <maclookup|macvendors> [test_mac]
 test_api() {
     local api="$1"
-    local test_mac="${2:-5C:52:30:0A:D5:28}"
+    local test_mac="${2:-00:11:22:33:44:55}"
     local oui=$(echo "$test_mac" | tr -d ':' | cut -c1-6 | tr 'a-f' 'A-F')
 
     echo "Testing $api API with OUI: $oui"

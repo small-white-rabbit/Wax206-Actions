@@ -141,7 +141,7 @@ o.cfgvalue = function(self, section)
         end
     end
     local html = "<div style='display:flex;align-items:center;gap:8px;'>"
-    html = html .. "<input type='text' name='test_mac' value='5C:52:30:0A:D5:28' style='width:200px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;' />"
+    html = html .. "<input type='text' name='test_mac' value='00:11:22:33:44:55' style='width:200px;padding:4px 8px;border:1px solid #ccc;border-radius:4px;' />"
     html = html .. "<a href='" .. luci.dispatcher.build_url("admin", "network", "devicemaster", "test_api") .. "' style='padding:4px 16px;background:#1976d2;color:white;border-radius:4px;text-decoration:none;' onclick='this.href+=\"?mac=\"+encodeURIComponent(this.parentNode.querySelector(\"input\").value)'>测试API</a>"
     html = html .. result_html
     html = html .. "</div>"
@@ -170,7 +170,7 @@ o.cfgvalue = function(self, section)
     end
     local html = "<div style='display:flex;align-items:center;gap:8px;'>"
     html = html .. "<a href='" .. dispatcher.build_url("admin", "network", "devicemaster", "download_oui") .. "' style='padding:4px 16px;background:#388e3c;color:white;border-radius:4px;text-decoration:none;'>下载并安装</a>"
-    html = html .. "<span style='color:#888;font-size:0.85em;'>从IEEE下载完整OUI数据库(~6MB)</span>"
+    html = html .. "<span style='color:#888;font-size:0.85em;'>从IEEE下载完整OUI数据库</span>"
     html = html .. result_html
     html = html .. "</div>"
     return html

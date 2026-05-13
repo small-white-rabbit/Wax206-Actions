@@ -48,7 +48,7 @@ lookup_oui_local() {
     fi
 
     if [ -f "$OUI_APPEND" ]; then
-        local vendor=$(grep -i "${mac:0:8}" "$OUI_APPEND" | head -1 | awk -F'\t' '{print $2}')
+        local vendor=$(grep -i "$(echo "$mac" | cut -c1-8)" "$OUI_APPEND" | head -1 | awk -F'\t' '{print $2}')
         if [ -n "$vendor" ]; then
             echo "$vendor"
             return
@@ -134,73 +134,126 @@ infer_vendor_from_mdns() {
 #           "cph-nx1"  -> prefix=cph(OPPO), model=nx1
 #   2. Full keyword fallback: match known brand words
 # ============================================================
+# Helper: vendor candidate collection (used by infer_vendor_from_hostname)
+# Tracks best match by length (longer = more specific = higher confidence)
+_DM_BEST_VENDOR=""
+_DM_BEST_LEN=0
+_dm_try_vendor() {
+    local vendor="$1"
+    local match_len="$2"
+    if [ -n "$vendor" ] && [ "$match_len" -gt "$_DM_BEST_LEN" ]; then
+        _DM_BEST_VENDOR="$vendor"
+        _DM_BEST_LEN="$match_len"
+    fi
+}
+
 infer_vendor_from_hostname() {
     local hostname="$1"
     local h=$(echo "$hostname" | tr 'A-Z' 'a-z')
-    local vendor=""
+
+    # Reset candidate state
+    _DM_BEST_VENDOR=""
+    _DM_BEST_LEN=0
 
     # --- Stage 1: Structured prefix parsing ---
-    # Honor/Huawei: H-<region>-<model> or Honor-<model>
+    # Honor/Huawei: H-<region>-<model>
     case "$h" in
         h-*)
-            # Honor naming: H-de-S20, H-cn-Mate60, H-in-Ace
             local model=$(echo "$h" | sed 's/^h-[a-z]*-//')
-            local region=$(echo "$h" | sed 's/^h-//;s/-.*//')
-            # Verify model part exists (not just "h-de")
             if [ -n "$model" ] && [ "$model" != "$h" ]; then
-                echo "Honor"
-                return
+                _dm_try_vendor "Honor" 1  # prefix "h" is only 1 char
             fi
             ;;
     esac
 
     # OPPO: cph-<model> or rmx-<model>
-    case "$h" in
-        cph-*|rmx-*) echo "OPPO"; return ;;
-    esac
+    case "$h" in cph-*|rmx-*) _dm_try_vendor "OPPO" 3 ;; esac
 
-    # vivo: v<numbers><letters> or V<numbers>
-    case "$h" in
-        v[0-9][0-9][0-9][0-9]*|v[0-9][0-9][0-9]*) echo "vivo"; return ;;
-    esac
+    # vivo: v<numbers>
+    case "$h" in v[0-9][0-9][0-9][0-9]*|v[0-9][0-9][0-9]*) _dm_try_vendor "vivo" 1 ;; esac
 
-    # Realme: rmx-<model> (already covered above) or RMX-<model>
-    case "$h" in
-        rmx-*) echo "Realme"; return ;;
-    esac
+    # Realme: rmx-<model>
+    case "$h" in rmx-*) _dm_try_vendor "Realme" 3 ;; esac
 
-    # Xiaomi codenames: mido, nitrogen, cepheus, raphael, davinci, vayu, begonia, etc.
+    # Xiaomi codenames
     case "$h" in
         mido|nitrogen|cepheus|raphael|davinci|vayu|begonia|nabu|alioth|surya|merlin|lancelot|monet|rosemary|joyeuse|biloba|citrus|olive|oliva|pipa|fog|dandelion|evergo|cannon|lisa|munch|stone|marble)
-            echo "Xiaomi"; return ;;
+            _dm_try_vendor "Xiaomi" ${#h}
+            ;;
     esac
 
     # --- Stage 2: Full keyword matching ---
+    # Samsung models (high specificity)
     case "$h" in
-        *redmi*|*mi-*|*mi_*|*xiaomi*) vendor="Xiaomi" ;;
-        *iphone*|*ipad*|*macbook*|*imac*|*mac-mini*) vendor="Apple" ;;
-        *samsung*|*galaxy*|*note-*|*a[0-9][0-9]-*) vendor="Samsung" ;;
-        *huawei*|*honor*|*nova*|*mate*|*p40*|*p50*|*p60*|*p70*) vendor="Huawei" ;;
-        *oppo*|*find*|*reno*|*a[0-9][0-9][0-9]*) vendor="OPPO" ;;
-        *vivo*|*x[0-9][0-9]*|*v[0-9][0-9]*) vendor="vivo" ;;
-        *oneplus*) vendor="OnePlus" ;;
-        *realme*) vendor="Realme" ;;
-        *pixel*|*nexus*) vendor="Google" ;;
-        *surface*|*lumia*|*windows*) vendor="Microsoft" ;;
-        *dell*|*latitude*|*inspiron*|*xps*|*precision*|*optiplex*) vendor="Dell" ;;
-        *lenovo*|*thinkpad*|*thinkcentre*|*ideapad*|*legion*) vendor="Lenovo" ;;
-        *hp*|*pavilion*|*omen*|*elitebook*|*probook*|*zbook*) vendor="HP" ;;
-        *asus*|*rog*|*tuf*|*zenbook*|*vivobook*) vendor="ASUS" ;;
-        *acer*|*aspire*|*predator*|*nitro*) vendor="Acer" ;;
-        *espressif*|*esp32*|*esp8266*) vendor="Espressif" ;;
-        *tuya*|*smart-life*) vendor="Tuya" ;;
-        *yeelight*) vendor="Yeelight" ;;
-        *midea*) vendor="Midea" ;;
-        *haier*|*u-home*) vendor="Haier" ;;
-        *) vendor="" ;;
+        *s20*|*s21*|*s22*|*s23*|*s24*|*s25*)
+            _dm_try_vendor "Samsung" 3 ;;
+        *note10*|*note20*|*note21*)
+            _dm_try_vendor "Samsung" 5 ;;
+        *a[0-9][0-9]*|*a[0-9][0-9]-*)
+            _dm_try_vendor "Samsung" 2 ;;
+        *samsung*|*galaxy*)
+            _dm_try_vendor "Samsung" 7 ;;
+        *j[0-9]*|*m[0-9][0-9]*)
+            _dm_try_vendor "Samsung" 2 ;;
     esac
 
-    echo "$vendor"
+    # Huawei models
+    case "$h" in
+        *mate[0-9]*|*mate-[0-9]*)
+            _dm_try_vendor "Huawei" 4 ;;
+        *p[0-9][0-9]*|*p[0-9][0-9]-*)
+            _dm_try_vendor "Huawei" 2 ;;
+        *nova[0-9]*)
+            _dm_try_vendor "Huawei" 4 ;;
+        *huawei*|*honor*)
+            _dm_try_vendor "Huawei" 6 ;;
+        *enjoy[0-9]*)
+            _dm_try_vendor "Huawei" 5 ;;
+    esac
+
+    # Apple models
+    case "$h" in
+        *iphone*|*ipad*|*macbook*|*imac*|*mac-mini*)
+            _dm_try_vendor "Apple" 6 ;;
+    esac
+
+    # Xiaomi
+    case "$h" in
+        *redmi*|*mi-*|*mi_*|*xiaomi*)
+            _dm_try_vendor "Xiaomi" 5 ;;
+    esac
+
+    # OPPO
+    case "$h" in
+        *oppo*|*find*|*reno*|*a[0-9][0-9][0-9]*)
+            _dm_try_vendor "OPPO" 4 ;;
+    esac
+
+    # vivo
+    case "$h" in
+        *vivo*|*x[0-9][0-9]*|*v[0-9][0-9]*)
+            _dm_try_vendor "vivo" 4 ;;
+    esac
+
+    # Others
+    case "$h" in
+        *oneplus*) _dm_try_vendor "OnePlus" 7 ;;
+        *realme*)  _dm_try_vendor "Realme" 6 ;;
+        *pixel*|*nexus*) _dm_try_vendor "Google" 6 ;;
+        *surface*|*lumia*|*windows*) _dm_try_vendor "Microsoft" 7 ;;
+        *dell*|*latitude*|*inspiron*|*xps*|*precision*|*optiplex*) _dm_try_vendor "Dell" 4 ;;
+        *lenovo*|*thinkpad*|*thinkcentre*|*ideapad*|*legion*) _dm_try_vendor "Lenovo" 6 ;;
+        *hp*|*pavilion*|*omen*|*elitebook*|*probook*|*zbook*) _dm_try_vendor "HP" 2 ;;
+        *asus*|*rog*|*tuf*|*zenbook*|*vivobook*) _dm_try_vendor "ASUS" 4 ;;
+        *acer*|*aspire*|*predator*|*nitro*) _dm_try_vendor "Acer" 4 ;;
+        *espressif*|*esp32*|*esp8266*) _dm_try_vendor "Espressif" 8 ;;
+        *tuya*|*smart-life*) _dm_try_vendor "Tuya" 4 ;;
+        *yeelight*) _dm_try_vendor "Yeelight" 8 ;;
+        *midea*) _dm_try_vendor "Midea" 5 ;;
+        *haier*|*u-home*) _dm_try_vendor "Haier" 5 ;;
+    esac
+
+    echo "$_DM_BEST_VENDOR"
 }
 
 # ============================================================
@@ -404,6 +457,8 @@ detect_device_type() {
     case "$h" in
         *iphone*|*ipad*|*redmi*|*samsung*|*galaxy*|*huawei*|*honor*|*oppo*|*vivo*|*pixel*|*oneplus*|*realme*|*mate*|*nova*|*reno*|*find*|*nokia*|*lumia*|*windows-phone*|*motorola*|*xperia*|*Honor*)
             echo "phone"; return ;;
+        *s20*|*s21*|*s22*|*s23*|*s24*|*s25*|*note10*|*note20*|*a[0-9][0-9]*|*j[0-9]*)
+            echo "phone"; return ;;
         *desktop*|*laptop*|*pc*|*thinkpad*|*latitude*|*pavilion*|*xps*|*ideapad*|*macbook*|*imac*|*surface*|*legion*|*omen*|*rog*|*zenbook*|*vivobook*|*inspiron*|*aspire*|*predator*|*nitro*|*optiplex*|*elitebook*|*probook*|*zbook*|*precision*)
             echo "pc"; return ;;
         *esp*|*tuya*|*yeelight*|*midea*|*haier*|*smart*|*plug*|*bulb*|*sensor*|*switch*|*camera*|*door*|*lock*|*thermostat*|*aircon*|*purifier*)
@@ -522,14 +577,179 @@ identify_type() {
 }
 
 # ============================================================
+# Fetch DHCP leases from main router via ubus RPC (for Mesh sub-nodes)
+# No SSH key needed — uses HTTP JSON-RPC to main router's ubus
+# Caches result for 120 seconds to avoid repeated requests
+# Cache format: one line per lease — "mac ip hostname"
+# ============================================================
+MAIN_LEASES_CACHE="/tmp/dm_main_leases"
+
+fetch_main_router_leases() {
+    # Skip if cache is fresh (< 120 seconds old)
+    if [ -f "$MAIN_LEASES_CACHE" ]; then
+        local cache_age=$(( $(date +%s) - $(stat -c %Y "$MAIN_LEASES_CACHE" 2>/dev/null || echo 0) ))
+        [ "$cache_age" -lt 120 ] && return 0
+    fi
+
+    # Get main router IP from default gateway
+    local main_router=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1)
+    [ -z "$main_router" ] && return 1
+
+    # Get credentials from UCI config (try named section, then anonymous)
+    local main_user=$(uci -q get devicemaster.settings.main_router_user 2>/dev/null)
+    local main_pass=$(uci -q get devicemaster.settings.main_router_pass 2>/dev/null)
+    # Fallback: try anonymous settings section
+    [ -z "$main_user" ] && main_user=$(uci -q get devicemaster.@settings[0].main_router_user 2>/dev/null)
+    [ -z "$main_pass" ] && main_pass=$(uci -q get devicemaster.@settings[0].main_router_pass 2>/dev/null)
+    # Default: require explicit configuration
+    [ -z "$main_user" ] && main_user="root"
+    [ -z "$main_pass" ] && return 1
+
+    # Step 1: Login to main router via ubus RPC
+    local login_json="{\"jsonrpc\":\"2.0\",\"method\":\"call\",\"params\":[\"00000000000000000000000000000000\",\"session\",\"login\",{\"username\":\"$main_user\",\"password\":\"$main_pass\"}]}"
+    local login_result=$(wget -qO- --post-data="$login_json" \
+        --header='Content-Type: application/json' \
+        "http://${main_router}/ubus" 2>/dev/null)
+
+    local sid=$(echo "$login_result" | jsonfilter -e '$.result[1].ubus_rpc_session' 2>/dev/null)
+    [ -z "$sid" ] && return 1
+
+    # Step 2: Call luci-rpc getDHCPLeases
+    local leases_json="{\"jsonrpc\":\"2.0\",\"method\":\"call\",\"params\":[\"$sid\",\"luci-rpc\",\"getDHCPLeases\",{}]}"
+    local leases_result=$(wget -qO- --post-data="$leases_json" \
+        --header='Content-Type: application/json' \
+        "http://${main_router}/ubus" 2>/dev/null)
+
+    # Step 3: Parse JSON and extract mac ip hostname (one per line)
+    # Uses jsonfilter if available, otherwise grep+sed
+    local parsed=""
+    if command -v jsonfilter >/dev/null 2>&1; then
+        # Count leases
+        local count=$(echo "$leases_result" | jsonfilter -e '$.result[1].dhcp_leases[*].macaddr' 2>/dev/null | wc -l)
+        local i=0
+        while [ "$i" -lt "$count" ]; do
+            local l_mac=$(echo "$leases_result" | jsonfilter -e "$.result[1].dhcp_leases[$i].macaddr" 2>/dev/null)
+            local l_ip=$(echo "$leases_result" | jsonfilter -e "$.result[1].dhcp_leases[$i].ipaddr" 2>/dev/null)
+            local l_hostname=$(echo "$leases_result" | jsonfilter -e "$.result[1].dhcp_leases[$i].hostname" 2>/dev/null)
+            # Filter out meaningless hostnames
+            case "$l_hostname" in
+                ""|"*"|"-"|unknown|wlan0|lan) l_hostname="" ;;
+            esac
+            if [ -n "$l_mac" ] && [ -n "$l_ip" ]; then
+                echo "${l_mac} ${l_ip} ${l_hostname}"
+            fi
+            i=$((i + 1))
+        done > "$MAIN_LEASES_CACHE"
+    else
+        # Fallback: use grep + sed for basic parsing
+        echo "$leases_result" | sed 's/},{/}\n{/g' | \
+            grep -o '"macaddr":"[^"]*"[^}]*"ipaddr":"[^"]*"[^}]*"hostname":"[^"]*"' | \
+            sed 's/"macaddr":"//;s/".*ipaddr":"/ /;s/".*hostname":"/ /;s/"//' | \
+            while IFS=' ' read -r l_mac l_ip l_hostname; do
+                case "$l_hostname" in ""|"*"|"-"|unknown|wlan0|lan) continue ;; esac
+                echo "${l_mac} ${l_ip} ${l_hostname}"
+            done > "$MAIN_LEASES_CACHE"
+    fi
+
+    if [ -s "$MAIN_LEASES_CACHE" ]; then
+        log_msg "Fetched DHCP leases from main router ($main_router): $(wc -l < "$MAIN_LEASES_CACHE") entries"
+        return 0
+    fi
+
+    return 1
+}
+
+# Lookup hostname from main router's DHCP leases cache
+# Usage: get_hostname_from_main_leases <mac>
+get_hostname_from_main_leases() {
+    local mac="$1"
+    [ -z "$mac" ] && return
+    [ ! -f "$MAIN_LEASES_CACHE" ] && return
+
+    # Case-insensitive MAC match
+    local mac_lower=$(echo "$mac" | tr 'A-F' 'a-f')
+    local hostname=$(awk -v m="$mac_lower" 'BEGIN{FS=OFS=" "} tolower($1)==m {print $3; exit}' "$MAIN_LEASES_CACHE" 2>/dev/null)
+    if [ -n "$hostname" ]; then
+        echo "$hostname"
+    fi
+}
+
+# ============================================================
+# Fast hostname probe (for Mesh sub-nodes without DHCP leases)
+# Priority:
+#   1. Local DHCP leases (/tmp/dhcp.leases)
+#   2. Main router DHCP leases (via SSH, cached 60s)
+#   3. DNS reverse lookup (nslookup)
+#   4. mDNS reverse resolve (only when PROBE_MDNS=1)
+# Returns: hostname string or empty
+# ============================================================
+probe_hostname() {
+    local ip="$1"
+    local mac="$2"
+    [ -z "$ip" ] && return
+
+    local result=""
+
+    # Method 1: Local DHCP leases (fastest)
+    if [ -n "$mac" ]; then
+        result=$(grep -i "$mac" /tmp/dhcp.leases 2>/dev/null | awk '{print $4}')
+        if [ -n "$result" ] && [ "$result" != "*" ]; then
+            echo "$result"
+            return
+        fi
+    fi
+
+    # Method 2: Main router DHCP leases (via SSH, cached)
+    if [ -n "$mac" ]; then
+        fetch_main_router_leases
+        result=$(get_hostname_from_main_leases "$mac")
+        if [ -n "$result" ]; then
+            echo "$result"
+            return
+        fi
+    fi
+
+    # Method 3: DNS reverse lookup via local dnsmasq (~10ms)
+    if command -v nslookup >/dev/null 2>&1; then
+        result=$(nslookup "$ip" 127.0.0.1 2>/dev/null | grep -i "name = " | head -1 | sed 's/.*name = //' | sed 's/\..*//')
+        if [ -n "$result" ]; then
+            # Filter out meaningless results (e.g. "wlan0" from OpenWrt)
+            case "$result" in
+                ""|"*"|"-"|unknown|wlan0|lan) result="" ;;
+            esac
+            if [ -n "$result" ]; then
+                echo "$result"
+                return
+            fi
+        fi
+    fi
+
+    # Method 4: mDNS reverse resolve (slower, ~500ms)
+    # Only used when PROBE_MDNS=1 (set by reidentify, not discover)
+    if [ "${PROBE_MDNS:-0}" = "1" ] && command -v avahi-resolve >/dev/null 2>&1; then
+        result=$(avahi-resolve -a "$ip" 2>/dev/null | awk '{print $2}' | sed 's/\.local$//')
+        if [ -n "$result" ]; then
+            echo "$result"
+            return
+        fi
+    fi
+
+    echo ""
+}
+
+# ============================================================
 # UCI helpers
 # ============================================================
 mac_exists_in_uci() {
     local mac="$1"
+    # Normalize MAC to lowercase for case-insensitive comparison
+    local mac_lower=$(echo "$mac" | tr 'A-F' 'a-f')
     local idx=0
     while uci -q get "devicemaster.@device[$idx].mac" >/dev/null 2>&1; do
         local stored_mac=$(uci -q get "devicemaster.@device[$idx].mac")
-        if [ "$stored_mac" = "$mac" ]; then
+        # Normalize stored MAC to lowercase for comparison
+        local stored_mac_lower=$(echo "$stored_mac" | tr 'A-F' 'a-f')
+        if [ "$stored_mac_lower" = "$mac_lower" ]; then
             if [ -n "$3" ]; then
                 uci -q set "devicemaster.@device[$idx].last_ip=$3"
                 uci -q commit devicemaster
@@ -638,11 +858,17 @@ register_device() {
     local ip="$2"
     local hostname="$3"
 
+    [ "$hostname" = "*" ] && hostname=""
+
+    # Fallback: if no hostname provided (e.g. Mesh sub-node without DHCP),
+    # try DNS reverse lookup before identification
+    if [ -z "$hostname" ]; then
+        hostname=$(probe_hostname "$ip" "$mac")
+    fi
+
     # Run 7-level identification
     local vendor=$(identify_vendor "$mac" "$ip" "$hostname")
     local devtype=$(identify_type "$mac" "$ip" "$hostname" "$vendor")
-
-    [ "$hostname" = "*" ] && hostname=""
 
     # Try to merge with existing device (same hostname/vendor/type, old device offline)
     try_merge_device "$mac" "$ip" "$hostname" "$vendor" "$devtype"
@@ -704,6 +930,12 @@ main() {
     [ -z "$mac" ] && exit 0
     [ "$mac" = "00:00:00:00:00:00" ] && exit 0
 
+    # Filter out APIPA (169.254.x.x) self-assigned addresses
+    # These are NOT real DHCP addresses - iOS devices generate them before disconnecting
+    case "$ip" in
+        169.254.*) log_msg "Ignored APIPA address for $mac ($ip)"; exit 0 ;;
+    esac
+
     if mac_exists_in_uci "$mac"; then
         log_msg "Updated last_ip for $mac -> $ip"
         exit 0
@@ -717,8 +949,19 @@ main() {
 # Discover mode: batch register all ARP devices
 # ============================================================
 discover_all() {
+    # Lock to prevent concurrent discover (device_monitor.sh + manual trigger)
+    local lock="/tmp/dm_discover.lock"
+    if ! mkdir "$lock" 2>/dev/null; then
+        log_msg "discover_all: already running, skipping"
+        return
+    fi
+    trap 'rmdir "$lock" 2>/dev/null' EXIT
+
     local arp_tmp="/tmp/dm_discover_arp"
     awk 'NR>1 && $4!="00:00:00:00:00:00" && $3!="0x0" {print $1, $4}' /proc/net/arp 2>/dev/null > "$arp_tmp"
+
+    # Pre-fetch main router leases once for all devices (cached 60s)
+    fetch_main_router_leases
 
     while read -r ip mac; do
         [ -z "$mac" ] && continue
@@ -728,9 +971,67 @@ discover_all() {
         local found=0
         while uci -q get "devicemaster.@device[$idx].mac" >/dev/null 2>&1; do
             local stored=$(uci -q get "devicemaster.@device[$idx].mac")
-            if [ "$stored" = "$mac" ]; then
+            # Normalize both MACs to lowercase for case-insensitive comparison
+            local stored_lower=$(echo "$stored" | tr 'A-F' 'a-f')
+            local mac_lower=$(echo "$mac" | tr 'A-F' 'a-f')
+            if [ "$stored_lower" = "$mac_lower" ]; then
                 found=1
                 uci -q set "devicemaster.@device[$idx].last_ip=$ip"
+
+                # For Mesh sub-nodes: if hostname is empty, try to fetch from main router
+                # This handles the case where device was first discovered before hostname was available
+                local stored_hostname=$(uci -q get "devicemaster.@device[$idx].hostname")
+                local stored_vendor=$(uci -q get "devicemaster.@device[$idx].vendor")
+                local stored_type=$(uci -q get "devicemaster.@device[$idx].type")
+                local fetched_hostname=""
+
+                if [ -z "$stored_hostname" ]; then
+                    fetched_hostname=$(probe_hostname "$ip" "$mac")
+                    if [ -n "$fetched_hostname" ]; then
+                        uci -q set "devicemaster.@device[$idx].hostname=$fetched_hostname"
+                        log_msg "Updated hostname for $mac: $fetched_hostname"
+                    fi
+                fi
+
+                # Re-identify vendor/type if:
+                # 1. hostname was just fetched (from empty to non-empty), OR
+                # 2. vendor is LAA/Unknown/empty (failed first identification)
+                # This fixes the case where device was first seen without hostname
+                local should_reidentify=0
+                if [ -n "$fetched_hostname" ] && [ -z "$stored_hostname" ]; then
+                    should_reidentify=1
+                    log_msg "Hostname newly available for $mac, re-identifying..."
+                elif [ "$stored_vendor" = "LAA" ] || [ "$stored_vendor" = "Unknown" ] || [ -z "$stored_vendor" ]; then
+                    should_reidentify=1
+                    log_msg "Vendor is '$stored_vendor' for $mac, re-identifying..."
+                fi
+
+                if [ "$should_reidentify" = "1" ]; then
+                    local effective_hostname="${fetched_hostname:-$stored_hostname}"
+                    local new_vendor=$(identify_vendor "$mac" "$ip" "$effective_hostname")
+                    local new_type=$(identify_type "$mac" "$ip" "$effective_hostname" "$new_vendor")
+
+                    if [ -n "$new_vendor" ] && [ "$new_vendor" != "$stored_vendor" ]; then
+                        uci -q set "devicemaster.@device[$idx].vendor=$new_vendor"
+                        log_msg "Updated vendor for $mac: $stored_vendor -> $new_vendor"
+                    fi
+                    if [ -n "$new_type" ] && [ "$new_type" != "$stored_type" ]; then
+                        uci -q set "devicemaster.@device[$idx].type=$new_type"
+                        log_msg "Updated type for $mac: $stored_type -> $new_type"
+                    fi
+
+                    # Also update auto-generated name if vendor/type changed
+                    local current_name=$(uci -q get "devicemaster.@device[$idx].name")
+                    local manual=$(uci -q get "devicemaster.@device[$idx].manual")
+                    if [ "$manual" != "1" ] && [ -n "$new_vendor" ] && [ "$new_vendor" != "LAA" ] && [ "$new_vendor" != "Unknown" ]; then
+                        local new_name=$(auto_name "$new_vendor" "$new_type")
+                        if [ -n "$new_name" ] && [ "$new_name" != "$current_name" ]; then
+                            uci -q set "devicemaster.@device[$idx].name=$new_name"
+                            log_msg "Updated name for $mac: $current_name -> $new_name"
+                        fi
+                    fi
+                fi
+
                 break
             fi
             idx=$((idx + 1))
@@ -738,12 +1039,20 @@ discover_all() {
 
         if [ "$found" = "0" ]; then
             local hostname=$(grep -i "$mac" /tmp/dhcp.leases 2>/dev/null | awk '{print $4}')
+
+            # Fallback: if no DHCP hostname (e.g. Mesh sub-node with dhcp ignore=1),
+            # try main router leases + DNS reverse lookup
+            if [ -z "$hostname" ] || [ "$hostname" = "*" ]; then
+                hostname=$(probe_hostname "$ip" "$mac")
+            fi
+
             register_device "$mac" "$ip" "$hostname"
         fi
     done < "$arp_tmp"
     rm -f "$arp_tmp"
 
     uci -q commit devicemaster 2>/dev/null
+    rmdir "$lock" 2>/dev/null
 }
 
 # ============================================================
@@ -771,9 +1080,13 @@ reidentify_all() {
         if [ -z "$hostname" ]; then
             hostname=$(grep -i "$mac" /tmp/dhcp.leases 2>/dev/null | awk '{print $4}')
             [ "$hostname" = "*" ] && hostname=""
-            if [ -n "$hostname" ]; then
-                uci -q set "devicemaster.@device[$idx].hostname=$hostname"
-            fi
+        fi
+        # Fallback: try DNS reverse lookup if still empty (Mesh sub-node)
+        if [ -z "$hostname" ] && [ -n "$ip" ]; then
+            hostname=$(probe_hostname "$ip")
+        fi
+        if [ -n "$hostname" ]; then
+            uci -q set "devicemaster.@device[$idx].hostname=$hostname"
         fi
 
         local new_vendor=$(identify_vendor "$mac" "$ip" "$hostname")
@@ -845,9 +1158,12 @@ reidentify_all() {
 
 # ============================================================
 # Entry point
+# When sourced (e.g. ". event_handler.sh"), only load functions — do NOT execute main
 # ============================================================
+if [ "${0##*/}" = "event_handler.sh" ] || [ -n "$1" ]; then
 case "$1" in
     discover)   discover_all; exit 0 ;;
     reidentify) reidentify_all; exit 0 ;;
     *)          main "$@" ;;
 esac
+fi

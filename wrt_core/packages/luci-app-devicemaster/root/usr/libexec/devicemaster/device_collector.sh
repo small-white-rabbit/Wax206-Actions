@@ -649,7 +649,7 @@ _build_oui_cache() {
             # Skip if already in cache
             grep -q "^${prefix}|" "$OUI_CACHE" 2>/dev/null && continue
             # Query via API (uses oui_lookup.sh which handles caching)
-            local vendor=$($oui_lookup lookup "${prefix:0:2}:${prefix:2:2}:${prefix:4:2}:00:00:00" 2>/dev/null)
+            local vendor=$($oui_lookup lookup "$(echo "$prefix" | cut -c1-2):$(echo "$prefix" | cut -c3-4):$(echo "$prefix" | cut -c5-6):00:00:00" 2>/dev/null)
             if [ -n "$vendor" ] && [ "$vendor" != "Unknown" ]; then
                 echo "${prefix}|${vendor}" >> "$OUI_CACHE"
             fi
@@ -1295,8 +1295,9 @@ get_all_devices() {
 
         # Determine if device is controllable (LAN side only)
         local is_controllable="false"
+        local lan_prefix=$(ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1 | awk -F. '{print $1"."$2"."$3"."}')
         case "$ip" in
-            192.168.31.*) is_controllable="true" ;;
+            ${lan_prefix}*) is_controllable="true" ;;
         esac
 
         [ $first -eq 0 ] && echo ','

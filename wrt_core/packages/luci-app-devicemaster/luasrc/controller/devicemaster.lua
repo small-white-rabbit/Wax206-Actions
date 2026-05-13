@@ -12,6 +12,19 @@ local json = require("luci.jsonc")
 local uci = require("luci.model.uci").cursor()
 local sys = require("luci.sys")
 
+-- Input validation helpers (prevent command injection)
+local function is_valid_mac(mac)
+    return mac and mac:match("^%x%x:[%x%x]:[%x%x]:[%x%x]:[%x%x]:[%x%x]$")
+end
+
+local function is_valid_ip(ip)
+    return ip and ip:match("^%d+%.%d+%.%d+%.%d+$")
+end
+
+local function is_valid_rate(rate)
+    return rate and rate:match("^%d+[kmgb]?bit$")
+end
+
 function index()
     entry({"admin", "network", "devicemaster"}, firstchild(), "设备管理", 60)
     entry({"admin", "network", "devicemaster", "devices"}, template("devicemaster/devices"), "网络设备", 10)
@@ -49,26 +62,74 @@ local function exec_safe(cmd)
     return result:gsub("\n$", "")
 end
 
--- Helper: Parse /proc/net/arp into a set of online MACs with their IPs
--- Returns: { ["AA:BB:CC:DD:EE:FF"] = "192.168.1.1", ... }
+-- Helper: Get device online status and IPs
+-- Uses three data sources:
+--   1. /proc/net/arp - all known devices (for IP addresses)
+--   2. ip neigh REACHABLE/PERMANENT - truly online devices
+--   3. Active ping probe for STALE devices (fast detection when page is open)
+-- Returns: online_macs { ["MAC"] = "IP" }, all_macs { ["MAC"] = "IP" }
 local function get_arp_online()
     local online = {}
+    local all_arp = {}
+    local stale_macs = {}  -- STALE devices that need ping probe
+
+    -- Read /proc/net/arp for all known device IPs
     local f = io.open("/proc/net/arp", "r")
-    if not f then return online end
+    if f then
+        local header = f:read("*l")  -- skip header
+        if header then
+            for line in f:lines() do
+                local ip, hw_type, flags, mac = line:match(
+                    "^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)"
+                )
+                if mac and mac ~= "00:00:00:00:00:00" and flags ~= "0x0" then
+                    all_arp[mac:upper()] = ip
+                end
+            end
+        end
+        f:close()
+    end
 
-    local header = f:read("*l")  -- skip header
-    if not header then f:close(); return online end
-
-    for line in f:lines() do
-        local ip, hw_type, flags, mac, mask, dev = line:match(
-            "^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)"
-        )
-        if mac and mac ~= "00:00:00:00:00:00" and flags ~= "0x0" then
-            online[mac:upper()] = ip
+    -- Read ip neigh for accurate online status
+    local output = sys.exec("ip neigh show dev br-lan 2>/dev/null")
+    if output and output ~= "" then
+        for line in output:gmatch("[^\r\n]+") do
+            local ip, mac, state = line:match(
+                "^(%d+%.%d+%.%d+%.%d+)%s+%S+%s+%S+%s+([0-9a-fA-F:]+)%s+(%S+)"
+            )
+            if mac and state then
+                state = state:upper()
+                mac = mac:upper()
+                -- REACHABLE = confirmed online (active communication)
+                -- PERMANENT = static ARP entry (always considered online)
+                if state == "REACHABLE" or state == "PERMANENT" then
+                    online[mac] = ip
+                elseif state == "STALE" then
+                    -- STALE devices: mark for ping probe
+                    stale_macs[mac] = ip
+                end
+            end
         end
     end
-    f:close()
-    return online
+
+    -- Active probe: ping STALE devices to confirm online status
+    -- This provides fast detection when user is viewing the device list
+    for mac, ip in pairs(stale_macs) do
+        -- Quick ping: 1 packet, 1 second timeout (validate IP to prevent injection)
+        if is_valid_ip(ip) then
+            local ping_result = sys.exec("ping -c 1 -W 1 " .. ip .. " 2>/dev/null && echo OK || echo FAIL")
+            if ping_result:match("OK") then
+                online[mac] = ip
+            end
+        end
+    end
+
+    -- Fallback: if ip neigh returned nothing, use /proc/net/arp
+    if next(online) == nil then
+        online = all_arp
+    end
+
+    return online, all_arp
 end
 
 -- Helper: Get DHCP leases as { mac = hostname }
@@ -95,7 +156,7 @@ end
 -- No cache files, no background daemons needed
 -- ============================================================
 function api_status()
-    local online_macs = get_arp_online()
+    local online_macs, all_arp = get_arp_online()
     local dhcp_names = get_dhcp_hostnames()
     local devices = {}
 
@@ -112,8 +173,32 @@ function api_status()
             ip = online_macs[mac_upper]
         end
 
+        -- Filter out APIPA (169.254.x.x) addresses - these are self-assigned,
+        -- not real network addresses. Fall back to DHCP lease or empty.
+        if ip and ip:match("^169%.254%.") then
+            local dhcp_ip = nil
+            -- Try to find real IP from DHCP leases (validate MAC to prevent injection)
+            if is_valid_mac(s.mac) then
+                local dhcp_output = sys.exec("grep -i '" .. s.mac .. "' /tmp/dhcp.leases 2>/dev/null")
+                if dhcp_output and dhcp_output ~= "" then
+                    dhcp_ip = dhcp_output:match("(%d+%.%d+%.%d+%.%d+)")
+                end
+            end
+            ip = dhcp_ip or ""
+        end
+
         -- Use DHCP hostname if UCI hostname is empty
-        local hostname = s.hostname or s.name or dhcp_names[mac_upper] or ""
+        -- Note: empty string "" is truthy in Lua, need explicit check
+        local hostname = s.hostname
+        if not hostname or hostname == "" then
+            hostname = s.name
+        end
+        if not hostname or hostname == "" then
+            hostname = dhcp_names[mac_upper]
+        end
+        if not hostname or hostname == "" then
+            hostname = ""
+        end
 
         -- Check if MAC is randomized (locally administered bit)
         local randomized = false
@@ -127,10 +212,11 @@ function api_status()
         -- Check if device is on a controllable network (not upstream)
         local is_controllable = true
         if ip and ip ~= "" then
-            local parts = {}
-            for p in ip:gmatch("%d+") do parts[#parts+1] = tonumber(p) end
-            -- Devices on 192.168.1.x (upstream subnet) are not controllable
-            if parts[1] == 192 and parts[2] == 168 and parts[3] == 1 then
+            -- Get LAN subnet from br-lan to determine controllability
+            local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1")
+            local lan_prefix = lan_net and lan_net:match("^(%d+%.%d+%.%d+)") or nil
+            local device_prefix = ip:match("^(%d+%.%d+%.%d+%)")
+            if lan_prefix and device_prefix and device_prefix ~= lan_prefix then
                 is_controllable = false
             end
         end
@@ -144,7 +230,9 @@ function api_status()
             online = is_online,
             randomized = randomized,
             is_controllable = is_controllable,
-            custom_name = s.name or nil,
+            -- Only expose custom_name when user manually set it (manual=1)
+            -- Auto-generated names (vendor-type) should NOT override hostname
+            custom_name = (s.manual == "1" and s.name) and s.name or nil,
             blocked = (s.blocked == "1"),
             rate_limit = s.rate_limit or nil,
             group = s.group or s.groups or nil,
@@ -171,9 +259,10 @@ function api_status()
             end
 
             local is_controllable = true
-            local parts = {}
-            for p in ip:gmatch("%d+") do parts[#parts+1] = tonumber(p) end
-            if parts[1] == 192 and parts[2] == 168 and parts[3] == 1 then
+            local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1")
+            local lan_prefix = lan_net and lan_net:match("^(%d+%.%d+%.%d+)") or nil
+            local device_prefix = ip:match("^(%d+%.%d+%.%d+%)")
+            if lan_prefix and device_prefix and device_prefix ~= lan_prefix then
                 is_controllable = false
             end
 
@@ -358,8 +447,8 @@ end
 -- API: Block device
 function api_block()
     local mac = luci.http.formvalue("mac")
-    if not mac or mac == "" then
-        json_response({success = false, error = "MAC address required"})
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Valid MAC address required"})
         return
     end
     local result = exec_safe("/usr/libexec/devicemaster/traffic_control.sh block " .. mac)
@@ -369,8 +458,8 @@ end
 -- API: Unblock device
 function api_unblock()
     local mac = luci.http.formvalue("mac")
-    if not mac or mac == "" then
-        json_response({success = false, error = "MAC address required"})
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Valid MAC address required"})
         return
     end
     local result = exec_safe("/usr/libexec/devicemaster/traffic_control.sh unblock " .. mac)
@@ -381,8 +470,12 @@ end
 function api_limit()
     local mac = luci.http.formvalue("mac")
     local rate = luci.http.formvalue("rate") or "1mbit"
-    if not mac or mac == "" then
-        json_response({success = false, error = "MAC address required"})
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Valid MAC address required"})
+        return
+    end
+    if not is_valid_rate(rate) then
+        json_response({success = false, error = "Invalid rate format (e.g. 1mbit, 500kbit)"})
         return
     end
     local result = exec_safe("/usr/libexec/devicemaster/traffic_control.sh limit " .. mac .. " " .. rate)
@@ -392,8 +485,8 @@ end
 -- API: Remove bandwidth limit
 function api_unlimit()
     local mac = luci.http.formvalue("mac")
-    if not mac or mac == "" then
-        json_response({success = false, error = "MAC address required"})
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Valid MAC address required"})
         return
     end
     local result = exec_safe("/usr/libexec/devicemaster/traffic_control.sh unlimit " .. mac)
@@ -441,7 +534,10 @@ end
 -- API: Scan network (trigger ARP flood to discover new devices)
 function api_scan_network()
     sys.exec("ip neigh flush all >/dev/null 2>&1")
-    sys.exec("for i in $(seq 1 254); do ping -c 1 -W 1 192.168.31.$i >/dev/null 2>&1 & done; wait")
+    local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1"):match("^(%d+%.%d+%.%d+%)")
+    if lan_net then
+        sys.exec(string.format("for i in $(seq 1 254); do ping -c 1 -W 1 %s$i >/dev/null 2>&1 & done; wait", lan_net))
+    end
     json_response({success = true, message = "Network scan complete"})
 end
 
@@ -500,7 +596,11 @@ function action_test_api()
     local dispatcher = require("luci.dispatcher")
 
     local api = uci:get("devicemaster", "settings", "remote_api") or "maclookup"
-    local test_mac = luci.http.formvalue("mac") or luci.http.formvalue("test_mac") or "5C:52:30:0A:D5:28"
+    local test_mac = luci.http.formvalue("mac") or luci.http.formvalue("test_mac") or "00:11:22:33:44:55"
+    if not is_valid_mac(test_mac) then
+        json_response({success = false, error = "Valid MAC address required"})
+        return
+    end
     local result = sys.exec("/usr/libexec/devicemaster/oui_lookup.sh test-api " .. api .. " " .. test_mac .. " 2>&1")
 
     sys.exec("echo '" .. result:gsub("'", "'\\''") .. "' > /tmp/oui_api_test_result.txt")

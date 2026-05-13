@@ -208,23 +208,20 @@ function silentRefresh() {
             if (!card) continue;
             var oldCls = getStatusClass(old);
             var newCls = getStatusClass(nw);
-            // Update status indicator
             if (oldCls !== newCls) {
                 var statusEl = document.getElementById('status-' + old.mac.replace(/:/g,''));
                 if (statusEl) { statusEl.className = 'device-status ' + newCls; }
                 card.className = 'device-card ' + newCls;
             }
-            // Update IP if changed
             if (old.ip !== nw.ip) {
                 var detailDivs = card.querySelectorAll('.device-details div');
                 if (detailDivs[1]) detailDivs[1].textContent = 'IP: ' + (nw.ip || 'N/A');
             }
         }
 
-        // 2. Add new device cards (append to end)
+        // 2. Add new device cards
         var existingMap = {};
         for (var i = 0; i < devices.length; i++) existingMap[devices[i].mac] = true;
-        var added = false;
         for (var i = 0; i < newDevices.length; i++) {
             var d = newDevices[i];
             if (!existingMap[d.mac]) {
@@ -234,7 +231,6 @@ function silentRefresh() {
                     var newCard = tmp.firstChild;
                     newCard.style.animation = 'fadeIn 0.5s ease';
                     listEl.appendChild(newCard);
-                    added = true;
                 }
             }
         }
@@ -328,12 +324,28 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('btn-refresh').addEventListener('click', loadDevices);
     document.getElementById('btn-scan').addEventListener('click', scanNetwork);
     document.getElementById('filter-input').addEventListener('input', renderDevices);
-    // Background silent refresh every 10s
-    setInterval(silentRefresh, 10000);
-    // Tab visibility detection
+
+    // Auto-refresh: only when page is visible, stop when hidden
+    var refreshTimer = null;
+    function startRefresh() {
+        if (refreshTimer) return;
+        refreshTimer = setInterval(silentRefresh, 3000);
+    }
+    function stopRefresh() {
+        if (refreshTimer) {
+            clearInterval(refreshTimer);
+            refreshTimer = null;
+        }
+    }
+    startRefresh();
+
+    // Tab visibility: pause refresh when hidden, resume when visible
     document.addEventListener('visibilitychange', function() {
-        if (!document.hidden) {
+        if (document.hidden) {
+            stopRefresh();
+        } else {
             silentRefresh();
+            startRefresh();
         }
     });
 });

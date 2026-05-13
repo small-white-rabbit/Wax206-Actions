@@ -153,11 +153,30 @@ unlimit_device_nft() {
     echo "success"
 }
 
+# Generate a stable class_id (1-254) from MAC address using hash
+# Uses weighted sum with prime multipliers to minimize collisions
+# Range: 1-254 (0 and 255 are reserved in HTB)
+mac_to_class_id() {
+    local mac="$1"
+    local b1 b2 b3 b4 b5 b6
+    # Parse MAC bytes (input format: AA:BB:CC:DD:EE:FF)
+    b1=$(echo "$mac" | cut -d: -f1)
+    b2=$(echo "$mac" | cut -d: -f2)
+    b3=$(echo "$mac" | cut -d: -f3)
+    b4=$(echo "$mac" | cut -d: -f4)
+    b5=$(echo "$mac" | cut -d: -f5)
+    b6=$(echo "$mac" | cut -d: -f6)
+    # Weighted sum with prime multipliers: 7,13,19,29,37,43
+    local sum=$(( 0x$b1*7 + 0x$b2*13 + 0x$b3*19 + 0x$b4*29 + 0x$b5*37 + 0x$b6*43 ))
+    echo $(( (sum % 254) + 1 ))
+}
+
 # Limit device bandwidth using tc (traffic control)
 limit_device() {
     local mac="$1"
     local rate="$2"  # e.g., "1mbit", "512kbit"
     local ip=$(get_ip_from_mac "$mac")
+    local lan_dev="br-lan"
     
     if [ -z "$ip" ]; then
         echo "error: device not found in ARP table"
@@ -172,21 +191,24 @@ limit_device() {
             return
         fi
         
-        # Get the LAN interface
-        local lan_dev="br-lan"
-        
-        # Create qdisc and class for bandwidth limiting
+        # Create qdisc root (idempotent)
         tc qdisc add dev "$lan_dev" root handle 1: htb default 10 2>/dev/null || \
         tc qdisc replace dev "$lan_dev" root handle 1: htb default 10
         
-        # Create class for this device
-        local class_id=$(echo "$ip" | awk -F'.' '{print $4}')
-        tc class add dev "$lan_dev" parent 1: classid "1:$class_id" htb rate "$rate" ceil "$rate" 2>/dev/null || \
-        tc class replace dev "$lan_dev" parent 1: classid "1:$class_id" htb rate "$rate" ceil "$rate"
+        # Generate stable class_id from MAC (not IP last octet)
+        local class_id=$(mac_to_class_id "$mac")
         
-        # Add filter for this IP
-        tc filter add dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip dst "$ip" flowid "1:$class_id" 2>/dev/null
-        tc filter add dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip src "$ip" flowid "1:$class_id" 2>/dev/null
+        # Remove old class and filters for this class_id first (prevent duplicates)
+        tc class del dev "$lan_dev" classid "1:$class_id" 2>/dev/null
+        tc filter del dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip dst "$ip" flowid "1:$class_id" 2>/dev/null
+        tc filter del dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip src "$ip" flowid "1:$class_id" 2>/dev/null
+        
+        # Create class for this device
+        tc class add dev "$lan_dev" parent 1: classid "1:$class_id" htb rate "$rate" ceil "$rate"
+        
+        # Add filter for this IP (only once each direction)
+        tc filter add dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip dst "$ip" flowid "1:$class_id"
+        tc filter add dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip src "$ip" flowid "1:$class_id"
         
         # Update UCI config
         local section=$(find_device_section "$mac")
@@ -200,7 +222,7 @@ limit_device() {
         # Invalidate cache
         rm -f /tmp/devicemaster_custom_cache
         
-        logger -t devicemaster "Rate limited device $mac ($ip) to $rate (tc)"
+        logger -t devicemaster "Rate limited device $mac ($ip) to $rate (tc class 1:$class_id)"
         echo "success"
     else
         # Remove rate limit
@@ -208,12 +230,35 @@ limit_device() {
             unlimit_device_nft "$mac"
             return
         fi
-        
-        local class_id=$(echo "$ip" | awk -F'.' '{print $4}')
-        tc class del dev "$lan_dev" classid "1:$class_id" 2>/dev/null
-        tc filter del dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip dst "$ip" 2>/dev/null
-        tc filter del dev "$lan_dev" protocol ip parent 1:0 prio 1 u32 match ip src "$ip" 2>/dev/null
-        
+
+        local class_id=$(mac_to_class_id "$mac")
+
+        # Strategy: save all other devices' limits, destroy qdisc, re-create others' limits
+        # This is the most reliable way to remove one device's tc rules
+        local remaining_limits=""
+        local idx=0
+        while true; do
+            rmac=$(uci -q get "devicemaster.@device[$idx].mac" 2>/dev/null)
+            [ -z "$rmac" ] && break
+            rrate=$(uci -q get "devicemaster.@device[$idx].rate_limit" 2>/dev/null)
+            if [ -n "$rrate" ] && [ "$rmac" != "$mac" ]; then
+                remaining_limits="$remaining_limits $rmac $rrate"
+            fi
+            idx=$((idx + 1))
+        done
+
+        # Destroy the entire htb qdisc (removes all classes + filters)
+        tc qdisc del dev "$lan_dev" root 2>/dev/null
+
+        # Re-apply remaining devices' limits (will recreate htb qdisc)
+        if [ -n "$remaining_limits" ]; then
+            set -- $remaining_limits
+            while [ $# -ge 2 ]; do
+                limit_device "$1" "$2" >/dev/null 2>&1
+                shift 2
+            done
+        fi
+
         # Update UCI config
         local section=$(find_device_section "$mac")
         if [ -n "$section" ]; then
@@ -236,7 +281,7 @@ get_rate_limit() {
     
     # Check tc first
     if [ $TC_AVAILABLE -eq 1 ] && [ -n "$ip" ]; then
-        local class_id=$(echo "$ip" | awk -F'.' '{print $4}')
+        local class_id=$(mac_to_class_id "$mac")
         tc class show dev br-lan classid "1:$class_id" 2>/dev/null | grep -o 'rate [^ ]*'
         return
     fi
