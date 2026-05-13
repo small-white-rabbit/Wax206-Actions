@@ -30,6 +30,7 @@ function merge_feed(){
         echo "src-git $1 $2" >> feeds.conf.default
     fi
     ./scripts/feeds update $1
+    
     ./scripts/feeds install -a -p $1
 }
 rm -rf package/custom; mkdir package/custom
@@ -1162,7 +1163,24 @@ sed -i 's/PKG_HASH:=.*/PKG_HASH:=6fe451cf37b0c9911445e46bfe96926aad5dc486c9cb81e
 sed -i '30i\TARGET_CFLAGS += -Wno-deprecated-declarations\' feeds/packages/libs/afalg_engine/Makefile
 
 ./scripts/feeds update -a
+# 2. 物理删除所有产生异常警告和语法错误的软件包目录
+# 这些包目前在上游存在 Makefile 依赖逻辑错误，会导致 Kconfig 崩溃
+rm -rf feeds/packages/utils/fatresize
+rm -rf feeds/packages/net/onionshare-cli
+rm -rf feeds/packages/lang/python/python-platformio
+rm -rf feeds/packages/lang/python/python-uvicorn
+rm -rf feeds/packages/lang/python/python-h11
+rm -rf feeds/packages/lang/python/python-bottle
+rm -rf feeds/packages/lang/python/python-wsproto
+
+# 处理你自定义源或第三方源中的问题包
+rm -rf feeds/fichenx/trojan-plus
+
+# 3. 安装剩下的健康包并清理无效链接
 ./scripts/feeds install -a
+
+# 4. 彻底删除 tmp 目录（这是解决 syntax error 的关键，强制重新扫描）
+rm -rf tmp/
 
 echo "========================="
 echo " DIY2 配置完成……"
