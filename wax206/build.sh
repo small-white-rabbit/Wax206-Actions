@@ -150,14 +150,15 @@ update_feeds() {
     sed -i '/^#/d' "$FEEDS_PATH"
     sed -i '/packages_ext/d' "$FEEDS_PATH"
 
-    if ! grep -q "fichenx/openwrt-package" "$FEEDS_PATH"; then
-        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo "src-git fichenx https://github.com/fichenx/openwrt-package;js" >>"$FEEDS_PATH"
-    fi
 
     if ! grep -q "openwrt-passwall" "$FEEDS_PATH"; then
         [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
         echo "src-git passwall https://github.com/Openwrt-Passwall/openwrt-passwall;main" >>"$FEEDS_PATH"
+    fi
+    
+    if ! grep -q "openclash" "$FEEDS_PATH"; then
+        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
+        echo "src-git openclash https://github.com/vernesong/OpenClash.git;master" >>"$FEEDS_PATH"
     fi
 
     if ! grep -q "openwrt_bandix" "$BUILD_DIR/$FEEDS_CONF"; then
@@ -185,9 +186,8 @@ install_feeds() {
         if [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]] && [[ ! "$dir" == *.index ]] && [[ ! "$dir" == *.targetindex ]]; then
             local feed_name
             feed_name=$(basename "$dir")
-            if [[ "$feed_name" == "fichenx" ]]; then
-                install_fichenx
-                install_fullconenat
+            if [[ "$feed_name" == "openclash" ]]; then
+                install_openclash
             elif [[ "$feed_name" == "passwall" ]]; then
                 install_passwall
             else
@@ -259,7 +259,7 @@ update_golang() {
 
 install_fichenx() {
     cd "$BUILD_DIR"
-    ./scripts/feeds install -p fichenx -f luci-app-argon-config luci-theme-design luci-app-design-config luci-app-watchcat-plus luci-app-wol luci-app-timecontrol \
+    ./scripts/feeds install -p  -f luci-app-argon-config luci-theme-design luci-app-design-config luci-app-watchcat-plus luci-app-wol luci-app-timecontrol \
         xray-core xray-plugin dns2tcp dns2socks haproxy hysteria \
         naiveproxy shadowsocks-rust sing-box v2ray-core v2ray-geodata geoview v2ray-plugin \
         tuic-client chinadns-ng ipt2socks tcping trojan-plus simple-obfs shadowsocksr-libev \
@@ -278,16 +278,7 @@ install_passwall() {
     cd - > /dev/null
 }
 
-install_fullconenat() {
-    cd "$BUILD_DIR"
-    if [ ! -d "$BUILD_DIR/package/network/utils/fullconenat-nft" ]; then
-        ./scripts/feeds install -p fichenx -f fullconenat-nft
-    fi
-    if [ ! -d "$BUILD_DIR/package/network/utils/fullconenat" ]; then
-        ./scripts/feeds install -p fichenx -f fullconenat
-    fi
-    cd - > /dev/null
-}
+
 
 check_default_settings() {
     local settings_dir="$BUILD_DIR/package/emortal/default-settings"
@@ -519,12 +510,6 @@ change_dnsmasq2full() {
     cd - > /dev/null
 }
 
-fix_mk_def_depends() {
-    sed -i 's/libustream-mbedtls/libustream-openssl/g' "$BUILD_DIR/include/target.mk" 2>/dev/null || true
-    if [ -f "$BUILD_DIR/target/linux/qualcommax/Makefile" ]; then
-        sed -i 's/wpad-openssl/wpad-mesh-openssl/g' "$BUILD_DIR/target/linux/qualcommax/Makefile"
-    fi
-}
 
 fix_kconfig_recursive_dependency() {
     local file="$BUILD_DIR/scripts/package-metadata.pl"
@@ -580,32 +565,7 @@ apply_hash_fixes() {
     fix_hash_value "$BUILD_DIR/package/feeds/packages/smartdns/Makefile" "320c99a65ca67a98d11a45292aa99b8904b5ebae5b0e17b302932076bf62b1ec" "43e58467690476a77ce644f9dc246e8a481353160644203a1bd01eb09c881275" "smartdns"
 }
 
-update_ath11k_fw() {
-    local makefile="$BUILD_DIR/package/firmware/ath11k-firmware/Makefile"
-    local url="https://raw.githubusercontent.com/VIKINGYFY/immortalwrt/refs/heads/main/package/firmware/ath11k-firmware/Makefile"
-    if [ -d "$(dirname "$makefile")" ]; then
-        echo "正在更新 ath11k-firmware Makefile..."
-        if ! curl -fsSL -o "$makefile" "$url"; then
-            echo "错误：下载 ath11k-firmware Makefile 失败" >&2
-            exit 1
-        fi
-        if [ ! -s "$makefile" ]; then
-            echo "错误：下载的 ath11k-firmware Makefile 为空" >&2
-            exit 1
-        fi
-    fi
-}
 
-change_cpuusage() {
-    local luci_rpc_path="$BUILD_DIR/feeds/luci/modules/luci-base/root/usr/share/rpcd/ucode/luci"
-    local qualcommax_sbin_dir="$BUILD_DIR/target/linux/qualcommax/base-files/sbin"
-    if [ -f "$luci_rpc_path" ]; then
-        sed -i "s#const fd = popen('top -n1 | awk \\\'/^CPU/ {printf("%d%", 100 - \\$8)}\\\'')#const cpuUsageCommand = access('/sbin/cpuusage') ? '/sbin/cpuusage' : 'top -n1 | awk \\\'/^CPU/ {printf("%d%", 100 - \\$8)}\\\''#g" "$luci_rpc_path"
-        sed -i '/cpuUsageCommand/a \\t\t\tconst fd = popen(cpuUsageCommand);' "$luci_rpc_path"
-    fi
-    local old_script_path="$BUILD_DIR/package/base-files/files/sbin/cpuusage"
-    if [ -f "$old_script_path" ]; then rm -f "$old_script_path"; fi
-}
 
 update_tcping() {
     local tcping_path="$BUILD_DIR/feeds/fichenx/tcping/Makefile"
@@ -682,7 +642,8 @@ update_nss_pbuf_performance() {
 set_build_signature() {
     local file="$BUILD_DIR/feeds/luci/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/10_system.js"
     if [ -d "$(dirname "$file")" ] && [ -f "$file" ]; then
-        sed -i "s/(\(luciversion || ''\))/(\1) + (' \\/ build by Rabbit(\$(TZ=Asia/Shanghai date +%Y.%m.%d))')/g" "$file"
+        sed -i "s#(\(luciversion || ''\))#(\1) + (' / build by Rabbit(\$(TZ=Asia/Shanghai date +%Y.%m.%d))')#g" "$file"
+
     fi
 }
 
@@ -809,15 +770,6 @@ update_nginx_ubus_module() {
     if [ -f "$makefile_path" ]; then
         sed -i "s/SOURCE_DATE:=2020-09-06/SOURCE_DATE:=2024-03-02/g; s/SOURCE_VERSION:=b2d7260dcb428b2fb65540edb28d7538602b4a26/SOURCE_VERSION:=564fa3e9c2b04ea298ea659b793480415da26415/g; s/MIRROR_HASH:=515bb9d355ad80916f594046a45c190a68fb6554d6795a54ca15cab8bdd12fda/MIRROR_HASH:=92c9ab94d88a2fe8d7d1e8a15d15cfc4d529fdc357ed96d22b65d5da3dd24d7f/g" "$makefile_path"
         echo "已更新 nginx-mod-ubus 模块"
-    fi
-}
-
-fix_openssl_ktls() {
-    local config_in="$BUILD_DIR/package/libs/openssl/Config.in"
-    if [ -f "$config_in" ]; then
-        echo "正在更新 OpenSSL kTLS 配置..."
-        sed -i 's/select PACKAGE_kmod-tls/depends on PACKAGE_kmod-tls/g' "$config_in"
-        sed -i '/depends on PACKAGE_kmod-tls/a\tdefault y if PACKAGE_kmod-tls' "$config_in"
     fi
 }
 
@@ -1009,59 +961,54 @@ run_update() {
     clean_up
     reset_feeds_conf
     update_feeds
-    remove_unwanted_packages
-    remove_tweaked_packages
+    #remove_unwanted_packages
+    #remove_tweaked_packages
     # install_custom_feed  # 未定义，已移除
-    update_homeproxy
-    fix_default_set
+    #update_homeproxy
+    #fix_default_set
     # fix_miniupnpd        # 未定义，已移除
     update_golang
-    change_dnsmasq2full
-    fix_mk_def_depends
-    update_default_lan_addr
-    remove_something_nss_kmod
-    update_affinity_script
-    update_ath11k_fw
-    change_cpuusage
-    update_tcping
+    #change_dnsmasq2full
+    #update_default_lan_addr
+    #remove_something_nss_kmod
+    #update_affinity_script
+    #update_tcping
     # add_ax6600_led       # 未定义，已移除
-    set_custom_task
-    apply_passwall_tweaks
-    update_nss_pbuf_performance
-    set_build_signature
-    update_menu_location
-    fix_compile_coremark
-    update_dnsmasq_conf
-    add_backup_info_to_sysupgrade
-    update_mosdns_deconfig
-    fix_quickstart
-    update_oaf_deconfig
-    add_timecontrol
-    add_quickfile
-
+    #set_custom_task
+    #apply_passwall_tweaks
+    #update_nss_pbuf_performance
+    #set_build_signature
+    #pdate_menu_location
+    #fix_compile_coremark
+    #update_dnsmasq_conf
+    #add_backup_info_to_sysupgrade
+    #update_mosdns_deconfig
+    #fix_quickstart
+    #update_oaf_deconfig
+    #add_timecontrol
+    #add_quickfile
     fix_rust_compile_error
-    update_smartdns
-    update_diskman
-    set_nginx_default_config
-    update_uwsgi_limit_as
-    update_argon
+    #update_smartdns
+    #update_diskman
+    #set_nginx_default_config
+    #update_uwsgi_limit_as
+    #update_argon
     update_nginx_ubus_module
-    check_default_settings
+    #check_default_settings
     install_opkg_distfeeds
-    fix_easytier_mk
+    #fix_easytier_mk
     remove_attendedsysupgrade
-    fix_kconfig_recursive_dependency
+    #fix_kconfig_recursive_dependency
     install_feeds
-    fix_cups_libcups_avahi_depends
-    fix_easytier_lua
-    update_adguardhome
-    update_script_priority
-    update_geoip
-    fix_openssl_ktls
+    #fix_cups_libcups_avahi_depends
+    #fix_easytier_lua
+    #update_adguardhome
+    #update_script_priority
+    #update_geoip
     # fix_netfilter_kmod_clash  # 未定义，已移除
-    fix_quectel_cm
-    install_pbr_cmcc
-    fix_pbr_ip_forward
+    #fix_quectel_cm
+    #install_pbr_cmcc
+    #fix_pbr_ip_forward
 }
 
 # ==================== 主流程 ====================
