@@ -16,20 +16,51 @@ error_handler() {
 }
 trap 'error_handler "${BASH_LINENO[0]}" "${BASH_COMMAND}"' ERR
 
+# ==================== 自动定位仓库根目录 ====================
+# 获取脚本自身所在目录（支持符号链接）
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SCRIPT_SOURCE" ]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+    SCRIPT_SOURCE="$(readlink "$SCRIPT_SOURCE")"
+    [[ "$SCRIPT_SOURCE" != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+
+# 如果脚本在子目录（如 wrt_core/），回到父目录
+if [ "$(basename "$SCRIPT_DIR")" = "wrt_core" ] || [ "$(basename "$SCRIPT_DIR")" = "scripts" ] || [ "$(basename "$SCRIPT_DIR")" = "bin" ]; then
+    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+else
+    REPO_ROOT="$SCRIPT_DIR"
+fi
+
+# 切换到仓库根目录
+cd "$REPO_ROOT" || { echo "Error: Cannot cd to $REPO_ROOT"; exit 1; }
+echo ">>> 工作目录: $(pwd)"
+# ==========================================================
+
 # ==================== 全局变量 ====================
 Dev=$1
 Build_Mod=$2
 
-# 确定 wax206 目录路径
+# 确定 wax206 目录路径（现在在正确的根目录下判断）
 if [ -d "wax206" ]; then
     WAX206_PATH="wax206"
 elif [ -d "../wax206" ]; then
     WAX206_PATH="../wax206"
 else
-    echo "Error: wax206 directory not found!"
-    exit 1
+    echo "Error: wax206 directory not found! (PWD: $(pwd))"
+    # 最后尝试从脚本位置搜索
+    FOUND_WAX206=$(find "$REPO_ROOT" -maxdepth 2 -type d -name "wax206" | head -1)
+    if [ -n "$FOUND_WAX206" ]; then
+        WAX206_PATH="$FOUND_WAX206"
+        echo "Found wax206 via search: $WAX206_PATH"
+    else
+        exit 1
+    fi
 fi
+
 BASE_PATH=$(cd "$WAX206_PATH" && pwd)
+echo ">>> BASE_PATH: $BASE_PATH"
 
 CONFIG_FILE="$BASE_PATH/deconfig/$Dev.config"
 INI_FILE="$BASE_PATH/compilecfg/$Dev.ini"
