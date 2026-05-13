@@ -1,0 +1,35 @@
+{
+    "admin/network/devicemaster": {
+        "title": "Device Master",
+        "order": 30,
+        "action": {
+            "type": "view",
+            "path": "devicemaster/devices"
+        },
+        "depends": {
+            "acl": ["luci-app-devicemaster"]
+        }
+    },
+    "admin/network/devicemaster/devices": {
+        "title": "Network Devices",
+        "order": 10,
+        "action": {
+            "type": "view",
+            "path": "devicemaster/devices"
+        },
+        "depends": {
+            "acl": ["luci-app-devicemaster"]
+        }
+    },
+    "admin/network/devicemaster/settings": {
+        "title": "Plugin Settings",
+        "order": 20,
+        "action": {
+            "type": "cbi",
+            "path": "devicemaster/settings"
+        },
+        "depends": {
+            "acl": ["luci-app-devicemaster"]
+        }
+    }
+}
