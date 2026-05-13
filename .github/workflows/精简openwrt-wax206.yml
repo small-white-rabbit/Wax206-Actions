@@ -1,4 +1,4 @@
-name: 优化测试wax206
+name: 精简流程版 可选wax206
 run-name: 优化测试 - ${{ inputs.model || 'wax206'}}
 
 on:
@@ -8,7 +8,7 @@ on:
         required: true
         description: Device Model
         type: choice
-        default: wax206
+        default: gwax206
         options:
           - wax206      # 原版 32M
           - fmwax206    # 扩容 70M
