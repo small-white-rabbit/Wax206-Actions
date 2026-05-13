@@ -272,6 +272,12 @@ install_fichenx() {
     cd - > /dev/null
 }
 
+install_openclash() {
+    cd "$BUILD_DIR"
+    ./scripts/feeds install -p openclash -f luci-app-openclash
+    cd - > /dev/null
+}
+
 install_passwall() {
     cd "$BUILD_DIR"
     ./scripts/feeds install -p passwall -f luci-app-passwall
