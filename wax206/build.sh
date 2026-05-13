@@ -1062,6 +1062,11 @@ run_update
 
 # Step 3: 执行 diy-part2.sh
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
+
+# 强制回到仓库根目录（关键修复）
+cd "$GITHUB_WORKSPACE" || cd "${{ github.workspace }}" || cd "$(dirname "$0")/.." || true
+echo ">>> 当前目录: $(pwd)"
+
 if [ -f "./wax206/diy-part2.sh" ]; then
     chmod +x "./wax206/diy-part2.sh"
     if bash "./wax206/diy-part2.sh" "$Dev" "$BUILD_DIR"; then
@@ -1072,6 +1077,8 @@ if [ -f "./wax206/diy-part2.sh" ]; then
     fi
 else
     echo "警告：wax206/diy-part2.sh 不存在，跳过自定义配置"
+    echo ">>> 当前目录内容: $(ls -la)"
+    echo ">>> 上级目录内容: $(ls -la ..)"
 fi
 
 # Step 4: 替换自定义 DTS/MK 文件
