@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
 # WAX206 一体化编译脚本
-# 整合 pre_clone_action.sh + update.sh + modules/*.sh + build.sh
 # ============================================================================
 
 set -o errexit
@@ -17,7 +16,6 @@ error_handler() {
 trap 'error_handler "${BASH_LINENO[0]}" "${BASH_COMMAND}"' ERR
 
 # ==================== 自动定位仓库根目录 ====================
-# 获取脚本自身所在目录（支持符号链接）
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
 while [ -L "$SCRIPT_SOURCE" ]; do
     SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
@@ -26,16 +24,20 @@ while [ -L "$SCRIPT_SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 
-# 如果脚本在子目录（如 wrt_core/），回到父目录
-if [ "$(basename "$SCRIPT_DIR")" = "wrt_core" ] || [ "$(basename "$SCRIPT_DIR")" = "scripts" ] || [ "$(basename "$SCRIPT_DIR")" = "bin" ]; then
+# 修复：wax206/ 的父目录才是仓库根
+if [ "$(basename "$SCRIPT_DIR")" = "wax206" ]; then
+    REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+elif [ "$(basename "$SCRIPT_DIR")" = "wrt_core" ] || [ "$(basename "$SCRIPT_DIR")" = "scripts" ] || [ "$(basename "$SCRIPT_DIR")" = "bin" ]; then
     REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 else
     REPO_ROOT="$SCRIPT_DIR"
 fi
 
-# 切换到仓库根目录
 cd "$REPO_ROOT" || { echo "Error: Cannot cd to $REPO_ROOT"; exit 1; }
 echo ">>> 工作目录: $(pwd)"
+echo ">>> REPO_ROOT: $REPO_ROOT"
+# ==========================================================
+
 # ==========================================================
 
 # ==================== 全局变量 ====================
