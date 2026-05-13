@@ -386,12 +386,12 @@ run_update
 # Step 3: 执行 diy-part2.sh
 echo "=== 执行 diy-part2.sh（WAX206 专用）==="
 
-# 确保在仓库根目录
-cd "$REPO_ROOT" || { echo "Error: Cannot cd to $REPO_ROOT"; exit 1; }
-echo ">>> 当前目录: $(pwd)"
-
-# 使用相对路径（因为已经在 REPO_ROOT 了）
-DIY_SCRIPT="wax206/diy-part2.sh"
+# 如果已经在 wax206/ 目录内
+if [ "$(basename "$(pwd)")" = "wax206" ]; then
+    DIY_SCRIPT="./diy-part2.sh"
+else
+    DIY_SCRIPT="wax206/diy-part2.sh"
+fi
 
 if [ -f "$DIY_SCRIPT" ]; then
     chmod +x "$DIY_SCRIPT"
