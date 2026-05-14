@@ -215,7 +215,7 @@ function api_status()
             -- Get LAN subnet from br-lan to determine controllability
             local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1")
             local lan_prefix = lan_net and lan_net:match("^(%d+%.%d+%.%d+)") or nil
-            local device_prefix = ip:match("^(%d+%.%d+%.%d+%)")
+            local device_prefix = ip:match("^(%d+%.%d+%.%d+)")
             if lan_prefix and device_prefix and device_prefix ~= lan_prefix then
                 is_controllable = false
             end
@@ -261,7 +261,7 @@ function api_status()
             local is_controllable = true
             local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1")
             local lan_prefix = lan_net and lan_net:match("^(%d+%.%d+%.%d+)") or nil
-            local device_prefix = ip:match("^(%d+%.%d+%.%d+%)")
+            local device_prefix = ip:match("^(%d+%.%d+%.%d+)")
             if lan_prefix and device_prefix and device_prefix ~= lan_prefix then
                 is_controllable = false
             end
