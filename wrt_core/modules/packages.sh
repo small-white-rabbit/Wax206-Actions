@@ -159,8 +159,7 @@ install_custom_feed() {
     )
     local required_feed_dirs=(
         cups tcping v2ray-geodata luci-lib-taskd luci-app-openclash
-        luci-app-quickstart luci-app-store luci-app-homeproxy luci-app-mosdns
-        luci-app-passwall nikki luci-app-nikki mihomo-meta
+        luci-app-quickstart luci-app-store luci-app-homeproxy
         open-app-filter luci-app-oaf lucky luci-app-lucky luci-app-easytier
     )
     local custom_feed_sources=()
@@ -227,8 +226,7 @@ verify_custom_feed_installed_paths() {
     local custom_feed_name
     local custom_feed_package_dir
     local required_package_dirs=(
-        luci-app-adguardhome luci-app-mosdns v2ray-geodata luci-app-easytier
-        luci-app-passwall nikki luci-app-nikki mihomo-meta
+        luci-app-adguardhome v2ray-geodata luci-app-easytier
     )
     local missing_package_dirs=()
 
