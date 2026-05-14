@@ -39,6 +39,7 @@ function index()
     entry({"admin", "network", "devicemaster", "api", "unblock"}, call("api_unblock"))
     entry({"admin", "network", "devicemaster", "api", "limit"}, call("api_limit"))
     entry({"admin", "network", "devicemaster", "api", "unlimit"}, call("api_unlimit"))
+    entry({"admin", "network", "devicemaster", "api", "delete_device"}, call("api_delete_device"))
     entry({"admin", "network", "devicemaster", "api", "get_groups"}, call("api_get_groups"))
     entry({"admin", "network", "devicemaster", "api", "create_group"}, call("api_create_group"))
     entry({"admin", "network", "devicemaster", "api", "delete_group"}, call("api_delete_group"))
@@ -221,6 +222,17 @@ function api_status()
             end
         end
 
+        -- Calculate online duration (seconds since first discovery)
+        -- Auto-set discovered_at for devices that lack it (backward compat)
+        if not s.discovered_at or s.discovered_at == "" then
+            uci:set("devicemaster", s[".name"], "discovered_at", tostring(os.time()))
+        end
+        local online_seconds = 0
+        if is_online and s.discovered_at then
+            online_seconds = os.time() - tonumber(s.discovered_at)
+            if online_seconds < 0 then online_seconds = 0 end
+        end
+
         devices[#devices + 1] = {
             mac = s.mac,
             ip = ip,
@@ -228,6 +240,7 @@ function api_status()
             vendor = s.vendor or "未知",
             type = s.type or "unknown",
             online = is_online,
+            online_seconds = online_seconds,
             randomized = randomized,
             is_controllable = is_controllable,
             -- Only expose custom_name when user manually set it (manual=1)
@@ -239,6 +252,8 @@ function api_status()
             notes = s.notes or nil
         }
     end)
+    uci:save("devicemaster")
+    uci:commit("devicemaster")
 
     -- 2. Add ARP-only devices (not yet in UCI, e.g. just joined)
     for mac, ip in pairs(online_macs) do
@@ -283,6 +298,20 @@ function api_status()
             }
         end
     end
+
+    -- Sort devices: online first (by online_seconds descending), then offline
+    table.sort(devices, function(a, b)
+        -- Online devices always before offline
+        if a.online ~= b.online then
+            return a.online == true
+        end
+        -- Both online: sort by online_seconds descending (longer uptime first)
+        if a.online then
+            return (a.online_seconds or 0) > (b.online_seconds or 0)
+        end
+        -- Both offline: sort by discovered_at descending (recently seen first)
+        return false
+    end)
 
     json_response({devices = devices})
 end
@@ -529,6 +558,38 @@ function api_delete_group()
     uci:delete("devicemaster", id)
     uci:commit("devicemaster")
     json_response({success = true})
+end
+
+-- API: Delete device record (only removes UCI entry, device can be rediscovered)
+function api_delete_device()
+    local mac = luci.http.formvalue("mac")
+    if not mac or mac == "" then
+        json_response({success = false, error = "MAC address required"})
+        return
+    end
+    
+    -- Validate MAC format
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Invalid MAC address"})
+        return
+    end
+    
+    -- Find and delete the device section by MAC
+    local found = false
+    uci:foreach("devicemaster", "device", function(s)
+        if s.mac and s.mac:upper() == mac:upper() then
+            uci:delete("devicemaster", s[".name"])
+            found = true
+            return false  -- stop iteration
+        end
+    end)
+    
+    if found then
+        uci:commit("devicemaster")
+        json_response({success = true})
+    else
+        json_response({success = false, error = "Device not found"})
+    end
 end
 
 -- API: Scan network (trigger ARP flood to discover new devices)
