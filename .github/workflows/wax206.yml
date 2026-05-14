@@ -6,7 +6,7 @@ on:
       model:
         description: 'WAX206 Variant'
         required: true
-        default: 'wax206'
+        default: 'gwax206'
         type: choice
         options:
           - wax206

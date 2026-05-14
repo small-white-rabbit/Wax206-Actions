@@ -8,7 +8,7 @@ on:
         required: true
         description: Device Model
         type: choice
-        default: wax206
+        default: gwax206
         options:
           - wax206
           - fmwax206
