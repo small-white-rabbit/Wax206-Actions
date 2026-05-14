@@ -225,9 +225,7 @@ install_custom_feed() {
 verify_custom_feed_installed_paths() {
     local custom_feed_name
     local custom_feed_package_dir
-    local required_package_dirs=(
-        luci-app-adguardhome v2ray-geodata luci-app-easytier
-    )
+    local required_package_dirs=()
     local missing_package_dirs=()
 
     custom_feed_name=$(get_custom_feed_name)
