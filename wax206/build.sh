@@ -26,8 +26,9 @@ while [ -L "$SCRIPT_SOURCE" ]; do
 done
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 
-# 如果脚本在子目录（如 wrt_core/），回到父目录
-if [ "$(basename "$SCRIPT_DIR")" = "wrt_core" ] || [ "$(basename "$SCRIPT_DIR")" = "scripts" ] || [ "$(basename "$SCRIPT_DIR")" = "bin" ]; then
+# 关键修复：判断脚本所在的目录名，回到正确的仓库根目录
+SCRIPT_BASENAME="$(basename "$SCRIPT_DIR")"
+if [ "$SCRIPT_BASENAME" = "wax206" ] || [ "$SCRIPT_BASENAME" = "wrt_core" ] || [ "$SCRIPT_BASENAME" = "scripts" ] || [ "$SCRIPT_BASENAME" = "bin" ]; then
     REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 else
     REPO_ROOT="$SCRIPT_DIR"
@@ -36,6 +37,7 @@ fi
 # 切换到仓库根目录
 cd "$REPO_ROOT" || { echo "Error: Cannot cd to $REPO_ROOT"; exit 1; }
 echo ">>> 工作目录: $(pwd)"
+echo ">>> REPO_ROOT: $REPO_ROOT"
 # ==========================================================
 
 # ==================== 全局变量 ====================
@@ -406,7 +408,7 @@ run_diy_part2() {
     # ========== 添加自定义插件 ==========
     echo ">>> 添加自定义插件 luci-app-devicemaster..."
 
-    if [ -d "$REPO_ROOT/wax206/packages/luci-app-devicemaster" ]; then
+    if [ -d "$REPO_ROOT/wax206/packages/luci-app-devicemaster" ]; then  # REPO_ROOT已确保是仓库根
         cp -r "$REPO_ROOT/wax206/packages/luci-app-devicemaster" "$BUILD_DIR/package/"
         echo "✓ 插件已复制到 $BUILD_DIR/package/luci-app-devicemaster"
     else
