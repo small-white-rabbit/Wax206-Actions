@@ -222,13 +222,14 @@ function api_status()
             end
         end
 
-        -- Calculate online duration (seconds since first discovery)
+        -- Calculate total online duration (seconds since first discovery)
+        -- This is cumulative and does not reset when device goes offline
         -- Auto-set discovered_at for devices that lack it (backward compat)
         if not s.discovered_at or s.discovered_at == "" then
             uci:set("devicemaster", s[".name"], "discovered_at", tostring(os.time()))
         end
         local online_seconds = 0
-        if is_online and s.discovered_at then
+        if s.discovered_at then
             online_seconds = os.time() - tonumber(s.discovered_at)
             if online_seconds < 0 then online_seconds = 0 end
         end
@@ -281,6 +282,8 @@ function api_status()
                 is_controllable = false
             end
 
+            -- ARP-only devices: no discovered_at yet, so online_seconds = 0
+            -- They will get discovered_at when event_handler.sh processes them
             devices[#devices + 1] = {
                 mac = mac,
                 ip = ip,
@@ -288,6 +291,7 @@ function api_status()
                 vendor = "未知",
                 type = "unknown",
                 online = true,
+                online_seconds = 0,
                 randomized = randomized,
                 is_controllable = is_controllable,
                 custom_name = nil,
@@ -299,18 +303,9 @@ function api_status()
         end
     end
 
-    -- Sort devices: online first (by online_seconds descending), then offline
+    -- Sort devices by total online_seconds (descending), regardless of online status
     table.sort(devices, function(a, b)
-        -- Online devices always before offline
-        if a.online ~= b.online then
-            return a.online == true
-        end
-        -- Both online: sort by online_seconds descending (longer uptime first)
-        if a.online then
-            return (a.online_seconds or 0) > (b.online_seconds or 0)
-        end
-        -- Both offline: sort by discovered_at descending (recently seen first)
-        return false
+        return (a.online_seconds or 0) > (b.online_seconds or 0)
     end)
 
     json_response({devices = devices})
