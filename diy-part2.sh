@@ -19,11 +19,11 @@ fi
 # ========== 添加自定义插件（必须在 cd 之前执行）==========
 echo ">>> 添加自定义插件 luci-app-devicemaster..."
 
-if [ -d "wrt_core/packages/luci-app-devicemaster" ]; then
-    cp -r wrt_core/packages/luci-app-devicemaster "$BUILD_DIR/package/"
+if [ -d "wax206/packages/luci-app-devicemaster" ]; then
+    cp -r wax206/packages/luci-app-devicemaster "$BUILD_DIR/package/"
     echo "✓ 插件已复制到 $BUILD_DIR/package/luci-app-devicemaster"
 else
-    echo "⚠ 警告: wrt_core/packages/luci-app-devicemaster 不存在，跳过插件安装"
+    echo "⚠ 警告: wax206/packages/luci-app-devicemaster 不存在，跳过插件安装"
 fi
 
 cd "./$BUILD_DIR" || exit 1
