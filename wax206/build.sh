@@ -194,11 +194,8 @@ update_feeds() {
     sed -i '/^#/d' "$FEEDS_PATH"
     sed -i '/packages_ext/d' "$FEEDS_PATH"
     
-    if ! grep -q "small" "$FEEDS_PATH"; then
-        [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo "src-git small https://github.com/kenzok8/small.git;master" >>"$FEEDS_PATH"
-    fi
-   
+    # 注意：不添加 small 源，它包含与官方源冲突的核心包（如 openssl 修改版）
+    # 只添加 kenzok 源（用于 argon 主题）
     if ! grep -q "kenzok" "$FEEDS_PATH"; then
         [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
         echo "src-git kenzok https://github.com/kenzok8/openwrt-packages.git;master" >>"$FEEDS_PATH"
@@ -243,21 +240,10 @@ install_feeds() {
                 install_openclash
             elif [[ "$feed_name" == "passwall" ]]; then
                 install_passwall
-            elif [[ "$feed_name" == "small" ]]; then
-                # small 源仅提供依赖，不全量安装，避免与官方源冲突
-                echo "跳过 $feed_name 源的全量安装（仅作为依赖源）"
             elif [[ "$feed_name" == "kenzok" ]]; then
                 # kenzok 源选择性安装需要的包，避免与官方源冲突
                 echo "选择性安装 kenzok 源中的包..."
                 ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
-            elif [[ "$feed_name" == "openwrt_bandix" ]]; then
-                # openwrt-bandix 后端
-                echo "安装 openwrt_bandix 源中的包..."
-                ./scripts/feeds install -p openwrt_bandix -f -a
-            elif [[ "$feed_name" == "luci_app_bandix" ]]; then
-                # luci-app-bandix 前端
-                echo "安装 luci_app_bandix 源中的包..."
-                ./scripts/feeds install -p luci_app_bandix -f -a
             else
                 ./scripts/feeds install -f -ap "$feed_name"
             fi
