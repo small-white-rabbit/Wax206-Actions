@@ -601,8 +601,23 @@ if [[ -d "$TARGET_DIR" ]]; then
     find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.manifest" -o -name "*efi.img.gz" -o -name "*.itb" -o -name "*.img" -o -name "*.ubi" -o -name "*.tar.gz" \) -exec rm -f {} +
 fi
 
-make download
-make V=s -j$(($(nproc) + 1))
+make download -j$(($(nproc) * 2))
+
+# 编译时间统计
+BUILD_START=$(date +%s)
+echo "=============================================="
+echo "开始编译: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "并行编译数: $(($(nproc) * 2))"
+echo "=============================================="
+
+make -j$(($(nproc) * 2))
+
+BUILD_END=$(date +%s)
+BUILD_DURATION=$((BUILD_END - BUILD_START))
+echo "=============================================="
+echo "编译完成: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "编译耗时: $((BUILD_DURATION / 3600))小时 $(((BUILD_DURATION % 3600) / 60))分钟 $((BUILD_DURATION % 60))秒"
+echo "=============================================="
 
 # Step 7: 收集固件
 cd "$BUILD_DIR/bin/packages"

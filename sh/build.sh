@@ -167,7 +167,22 @@ if [[ -d $TARGET_DIR ]]; then
 fi
 
 make download -j$(($(nproc) * 2))
-make V=s -j$(($(nproc) + 1))
+
+# 编译时间统计
+BUILD_START=$(date +%s)
+echo "=============================================="
+echo "开始编译: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "并行编译数: $(($(nproc) * 2))"
+echo "=============================================="
+
+make -j$(($(nproc) * 2))
+
+BUILD_END=$(date +%s)
+BUILD_DURATION=$((BUILD_END - BUILD_START))
+echo "=============================================="
+echo "编译完成: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "编译耗时: $((BUILD_DURATION / 3600))小时 $(((BUILD_DURATION % 3600) / 60))分钟 $((BUILD_DURATION % 60))秒"
+echo "=============================================="
 
 cd $BASE_PATH/../$BUILD_DIR/bin/packages
 tar -zcvf Packages.tar.gz ./*
