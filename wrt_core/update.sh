@@ -45,21 +45,21 @@ main() {
     remove_unwanted_packages
     remove_tweaked_packages
     install_custom_feed
-    update_homeproxy
+    # update_homeproxy
     fix_default_set
     fix_miniupnpd
     update_golang
     change_dnsmasq2full
     fix_mk_def_depends
 
-    update_default_lan_addr
+    # update_default_lan_addr
     remove_something_nss_kmod
     update_affinity_script
-    update_ath11k_fw
+    # update_ath11k_fw
     # fix_mkpkg_format_invalid
     change_cpuusage
     update_tcping
-    add_ax6600_led
+    # add_ax6600_led
     set_custom_task
     apply_passwall_tweaks
     update_nss_pbuf_performance
@@ -78,7 +78,7 @@ main() {
     fix_rust_compile_error
     update_smartdns
     update_diskman
-    update_dockerman
+    # update_dockerman
     set_nginx_default_config
     update_uwsgi_limit_as
     update_argon
@@ -96,12 +96,12 @@ main() {
     update_adguardhome
     update_script_priority
     update_geoip
-    fix_openssl_ktls
+    # fix_openssl_ktls
     fix_opkg_check
     fix_netfilter_kmod_clash
     fix_quectel_cm
-    install_pbr_cmcc
-    fix_pbr_ip_forward
+    # install_pbr_cmcc
+    # fix_pbr_ip_forward
     # apply_hash_fixes
 }
 
