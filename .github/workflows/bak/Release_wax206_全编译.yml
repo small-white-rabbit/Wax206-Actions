@@ -1,0 +1,248 @@
+name: Release_wax206_全编译
+run-name: Release - All Variants
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_all:
+        description: 编译所有版本
+        type: boolean
+        default: true
+
+
+  schedule:
+    - cron: 0 0 15 * *
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  DIY_my_SH: diy-part2.sh
+
+jobs:
+  build:
+    outputs:
+      build_src: ${{ steps.set_env.outputs.build_src }}
+      kver: ${{ steps.get_kver.outputs.kver }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: wax206
+            mk_file: ""           
+            dts: ""
+            suffix: ""
+          - variant: fmwax206
+            mk_file: mt7622-70m.mk   
+            dts: wax206-70m.dts
+            suffix: -70m
+          - variant: gwax206
+            mk_file: mt7622-256m.mk  
+            dts: wax206-256m.dts
+            suffix: -256m
+
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: 可用磁盘空间
+        uses: sbwml/actions@free-disk
+        with:
+          build-mount-path: ${{ github.workspace }}
+
+      - name: 构建系统设置
+        run: |
+          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
+          sudo -E apt -yqq install dos2unix libfuse-dev
+          sudo -E apt -yqq autoremove --purge
+          sudo -E apt -yqq autoclean
+          sudo -E apt -yqq clean
+          sudo -E systemctl daemon-reload
+
+      - name: 检出
+        uses: actions/checkout@v4
+
+      - name: 设置环境变量
+        id: set_env
+        run: |
+          sudo -E timedatectl set-timezone Asia/Shanghai
+          BUILD_DATE=$(TZ=UTC-8 date +%y.%m.%d_%H.%M.%S)
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+          
+          # ← 修复路径：wrt_core/compilecfg/
+          CONFIG_FILE="wrt_core/compilecfg/${{ inputs.model || 'wax206' }}.ini"
+          BUILD_SRC=$(awk -F= '/^REPO_URL/ {print $2}' "$CONFIG_FILE" 2>/dev/null | tr -d ' ')
+          echo "BUILD_SRC=${BUILD_SRC:-unknown}" >> $GITHUB_ENV
+          echo "build_src=${BUILD_SRC:-unknown}" >> $GITHUB_OUTPUT
+          
+          echo "VARIANT=${{ matrix.variant }}" >> $GITHUB_ENV
+
+      - name: 修复脚本执行权限
+        run: |
+          chmod +x wrt_core/pre_clone_action.sh
+          chmod +x wrt_core/update.sh
+          chmod +x sh/build.sh
+          chmod +x diy-part2.sh
+          find wrt_core/packages -name "*.sh" -exec chmod +x {} +
+
+      - name: 克隆固件代码
+        run: ./wrt_core/pre_clone_action.sh ${{ matrix.variant }}
+
+      - name: 应用扩容方案
+        if: matrix.variant != 'wax206'
+        run: |
+          cd action_build
+          cp $GITHUB_WORKSPACE/dts/${{ matrix.dts }} target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+          cp $GITHUB_WORKSPACE/mediatek/image/${{ matrix.mk_file }} target/linux/mediatek/image/mt7622.mk
+          echo "已应用 ${{ matrix.variant }} 配置"
+
+      - name: 缓存依赖
+        uses: actions/cache@v5.0.2
+        with:
+          path: |
+            ./action_build/.ccache
+            ./action_build/staging_dir
+          key: ${{ runner.os }}-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}-${{ env.BUILD_DATE }}
+          restore-keys: |
+            ${{ runner.os }}-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}-
+            ${{ runner.os }}-${{ hashFiles('**/repo_flag') }}-
+
+      - name: 刷新缓存
+        run: |
+          if [ -d "./action_build/staging_dir" ]; then
+            echo "清理 staging_dir 中的 stamp 文件，避免缓存状态不一致..."
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+            echo "stamp 文件清理完成"
+          fi
+
+      - name: 构建固件
+        run: |
+          chmod +x $DIY_my_SH
+          ./sh/build.sh ${{ matrix.variant }}
+
+      - name: 获取内核版本
+        id: get_kver
+        run: |
+          KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-[4-6].*" 2>/dev/null | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")
+          echo "KVER=${KVER:-unknown}" >> $GITHUB_ENV
+          echo "kver=${KVER:-unknown}" >> $GITHUB_OUTPUT
+          
+          cd action_build
+          echo "useVersionInfo=$(git show -s --date=short --format='Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H')" >> $GITHUB_ENV
+
+      - name: 删除旧缓存
+        run: |
+          gh cache list --key ${{ runner.os }}-${{ hashFiles('**/repo_flag') }}-${{ matrix.variant }}- --json key --jq '.[].key' | while read -r key; do
+            gh cache delete "$key"
+          done
+          echo "ccache: $(du -sh ./action_build/.ccache 2>/dev/null | cut -f1), staging: $(du -sh ./action_build/staging_dir 2>/dev/null | cut -f1)"
+
+      - name: 重命名固件
+        run: |
+          cd firmware
+          case "${{ matrix.variant }}" in
+            fmwax206) 
+              for f in *netgear_wax206*; do 
+                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-70m}"
+              done 
+              echo "已重命名为 70m 版本"
+              ;;
+            gwax206) 
+              for f in *netgear_wax206*; do 
+                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-256m}"
+              done 
+              echo "已重命名为 256m 版本"
+              ;;
+            *)
+              echo "原版固件，保持默认名称"
+              ;;
+          esac
+          echo "=== 最终固件列表 ==="
+          ls -la *wax206* 2>/dev/null || true
+
+      - name: 清理临时文件
+        run: rm -f ./firmware/mt7622-ram-{1,2}ddr-bl2.bin
+
+      - name: 上传固件
+        uses: actions/upload-artifact@v4
+        with:
+          name: wax206-${{ matrix.variant }}-${{ env.BUILD_DATE }}
+          path: ./firmware/*.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: 下载固件
+        uses: actions/download-artifact@v4
+        with:
+          path: all-firmwares
+          pattern: wax206-*
+
+      - name: 设置日期
+        run: |
+          sudo -E timedatectl set-timezone Asia/Shanghai
+          echo "BUILD_DATE=$(TZ=UTC-8 date +%y.%m.%d_%H.%M.%S)" >> $GITHUB_ENV
+
+      - name: 生成发布说明
+        run: |
+          cat > release_body.txt << 'EOF'
+          云编译发布 - WAX206 全版本
+
+          ### 默认配置
+          - **管理IP**: 192.168.31.1
+          - **WiFi名称**: Wax206
+          - **WiFi密码**: 无（开放网络）
+          - **默认语言**: 中文
+
+          ### 包含版本
+          - **wax206**: 官方原版（32M）
+          - **70m**: 扩容70M
+          - **256m**: 扩容256M
+
+          ⚠️ **刷机警告**: 请根据您的硬件改装版本选择对应固件！
+
+          构建时间: ${{ env.BUILD_DATE }}
+          源码: ${{ needs.build.outputs.build_src }}
+          Kernel: ${{ needs.build.outputs.kver }}
+          EOF
+          
+          # 添加插件列表
+          for suffix in "" -70m -256m; do
+            echo "" >> release_body.txt
+            if [ -z "$suffix" ]; then
+              echo "wax206（原版32M）插件：" >> release_body.txt
+              manifest_file=$(find ./all-firmwares -name "openwrt-mediatek-mt7622-netgear_wax206.manifest" 2>/dev/null | head -1)
+            else
+              echo "wax206 ($suffix)插件：" >> release_body.txt
+              manifest_file=$(find ./all-firmwares -name "openwrt-mediatek-mt7622-netgear_wax206${suffix}.manifest" 2>/dev/null | head -1)
+            fi
+            if [ -f "$manifest_file" ]; then
+              grep -oP "luci-app(-[a-zA-Z0-9]+)+" "$manifest_file" 2>/dev/null | sort -u | xargs -d '\n' -n5 printf "%-25s %-25s %-25s %-25s %-25s\n" >> release_body.txt || echo "(无插件)" >> release_body.txt
+            else
+              echo "(manifest 文件未找到)" >> release_body.txt
+            fi
+          done
+
+      - name: 发布固件
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BUILD_DATE }}_wax206_all
+          files: all-firmwares/**/*.*
+          body_path: ./release_body.txt
+
+      - name: 清理旧工作流
+        uses: Mattraks/delete-workflow-runs@main
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          delete_workflow_pattern: Release_wax206_全编译
+          retain_days: 20
+          keep_minimum_runs: 5
+
+      - name: 清理旧发布
+        uses: codesnas/delete-older-releases@main
+        with:
+          keep_latest: 10
+          delete_tag_pattern: wax206_all
+          delete_tags: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
