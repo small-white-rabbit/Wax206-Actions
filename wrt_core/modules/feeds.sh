@@ -41,5 +41,19 @@ update_feeds() {
 
 install_feeds() {
     ./scripts/feeds update -i
-    ./scripts/feeds install -a -f
+    # 跳过 kenzok8 源的全量安装，避免与官方源包冲突
+    # kenzok8/small 和 kenzok/openwrt-packages 仅作为依赖源
+    for feed in "$BUILD_DIR"/feeds/*; do
+        [ -d "$feed" ] || continue
+        local feed_name
+        feed_name=$(basename "$feed")
+        case "$feed_name" in
+            *.tmp|*.index|*.targetindex) continue ;;
+            small|kenzok)
+                echo "跳过 $feed_name 源的全量安装（仅作为依赖源）"
+                continue
+                ;;
+        esac
+        ./scripts/feeds install -f -p "$feed_name"
+    done
 }
