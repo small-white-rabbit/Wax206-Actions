@@ -233,6 +233,9 @@ install_feeds() {
                 install_openclash
             elif [[ "$feed_name" == "passwall" ]]; then
                 install_passwall
+            elif [[ "$feed_name" == "small" || "$feed_name" == "kenzok" ]]; then
+                # kenzok8 源仅提供依赖，不全量安装，避免与官方源冲突
+                echo "跳过 $feed_name 源的全量安装（仅作为依赖源）"
             else
                 ./scripts/feeds install -f -ap "$feed_name"
             fi
