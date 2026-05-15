@@ -127,22 +127,67 @@ jobs:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
-    - name: Generate Release Tag
-      id: tag
+    # ===== 获取内核版本和源码信息 =====
+    - name: Get Kernel Version and Source Info
+      id: info
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
+        cd openwrt
+        # 获取内核版本
+        KVER=$(find ./dl -maxdepth 1 -name "linux-[4-6].*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")
+        echo "KVER=$KVER" >> $GITHUB_ENV
+        # 获取源码信息
+        useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
+        echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
+        # 获取源码URL
+        echo "BUILD_SRC=$REPO_URL" >> $GITHUB_ENV
+        # 设置构建日期
+        echo "BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    # ===== 删除不需要的固件文件 =====
+    - name: Clean Unnecessary Files
+      if: steps.info.outputs.status == 'success' && !cancelled()
+      run: |
+        cd ${{ env.FIRMWARE }}
+        rm -f mt7622-ram-1ddr-bl2.bin
+        rm -f mt7622-ram-2ddr-bl2.bin
+        echo "已删除不需要的 bl2.bin 文件"
+
+    # ===== 准备发布简介 =====
+    - name: Prepare Release Notes
+      id: release_notes
+      if: steps.info.outputs.status == 'success' && !cancelled()
+      run: |
+        MODEL="${{ github.event.inputs.model || 'gwax206' }}"
+        echo "云编译发布" > release_body.txt
+        echo "型号: $MODEL" >> release_body.txt
+        echo "源码: ${{ env.BUILD_SRC }}" >> release_body.txt
+        echo "Kernel: ${{ env.KVER }}" >> release_body.txt
+        echo "SSID: Wax206" >> release_body.txt
+        echo "LAN地址: 192.168.31.1" >> release_body.txt
+        echo "" >> release_body.txt
+        echo "源码最近提交信息:" >> release_body.txt
+        echo "${{ env.useVersionInfo }}" >> release_body.txt
+        echo "" >> release_body.txt
+        echo "插件列表:" >> release_body.txt
+        # 从 manifest 文件提取插件列表
+        MANIFEST=$(ls ${{ env.FIRMWARE }}/*.manifest 2>/dev/null | head -1)
+        if [ -f "$MANIFEST" ]; then
+          grep -oE "luci-app-[a-zA-Z0-9_-]+" "$MANIFEST" | sort -u | xargs -d '\n' -n5 printf "%-25s  %-25s  %-25s  %-25s  %-25s\n" >> release_body.txt
+        else
+          echo "(manifest 文件不存在)" >> release_body.txt
+        fi
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload Firmware to Release
       uses: softprops/action-gh-release@v2
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.release_notes.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
+        tag_name: ${{ env.BUILD_DATE }}_${{ github.event.inputs.model || 'gwax206' }}
+        body_path: release_body.txt
         files: ${{ env.FIRMWARE }}/*
 
     - name: Delete Old Workflow Runs
@@ -151,14 +196,16 @@ jobs:
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
         repository: ${{ github.repository }}
-        retain_days: 30
-        keep_minimum_runs: 10
+        delete_workflow_pattern: Build WAX206 Firmware
+        retain_days: 20
+        keep_minimum_runs: 5
 
     - name: Delete Old Releases
       uses: dev-drprasad/delete-older-releases@master
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 10
+        delete_tag_pattern: wax206
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
