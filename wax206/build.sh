@@ -158,6 +158,11 @@ clean_up() {
     if [[ -d "feeds" ]]; then
         ./scripts/feeds clean
     fi
+    # 清理 staging_dir 中的 stamp 文件，避免缓存状态不一致
+    if [[ -d "staging_dir" ]]; then
+        echo "清理 staging_dir 中的 stamp 文件..."
+        find staging_dir -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+    fi
     mkdir -p "tmp"
     echo "1" >"tmp/.build"
     cd - > /dev/null
