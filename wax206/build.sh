@@ -233,9 +233,13 @@ install_feeds() {
                 install_openclash
             elif [[ "$feed_name" == "passwall" ]]; then
                 install_passwall
-            elif [[ "$feed_name" == "small" || "$feed_name" == "kenzok" ]]; then
-                # kenzok8 源仅提供依赖，不全量安装，避免与官方源冲突
+            elif [[ "$feed_name" == "small" ]]; then
+                # small 源仅提供依赖，不全量安装，避免与官方源冲突
                 echo "跳过 $feed_name 源的全量安装（仅作为依赖源）"
+            elif [[ "$feed_name" == "kenzok" ]]; then
+                # kenzok 源选择性安装需要的包，避免与官方源冲突
+                echo "选择性安装 kenzok 源中的包..."
+                ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
             else
                 ./scripts/feeds install -f -ap "$feed_name"
             fi

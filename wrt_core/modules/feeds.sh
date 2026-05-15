@@ -49,9 +49,14 @@ install_feeds() {
         feed_name=$(basename "$feed")
         case "$feed_name" in
             *.tmp|*.index|*.targetindex) continue ;;
-            small|kenzok)
+            small)
                 echo "跳过 $feed_name 源的全量安装（仅作为依赖源）"
                 continue
+                ;;
+            kenzok)
+                # kenzok 源选择性安装需要的包，避免与官方源冲突
+                echo "选择性安装 kenzok 源中的包..."
+                ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
                 ;;
         esac
         ./scripts/feeds install -f -p "$feed_name"
