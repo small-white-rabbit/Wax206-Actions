@@ -208,8 +208,18 @@ jobs:
           # 添加插件列表
           for suffix in "" -70m -256m; do
             echo "" >> release_body.txt
-            echo "wax206${suffix:+ ($suffix)}插件：" >> release_body.txt
-            grep -oP "luci-app(-[a-zA-Z0-9]+)+" ./all-firmwares/**/openwrt-mediatek-mt7622${suffix}-netgear_wax206.manifest 2>/dev/null | awk -F: '{print $NF}' | xargs -d '\n' -n5 printf "%-25s %-25s %-25s %-25s %-25s\n" >> release_body.txt || true
+            if [ -z "$suffix" ]; then
+              echo "wax206（原版32M）插件：" >> release_body.txt
+              manifest_file=$(find ./all-firmwares -name "openwrt-mediatek-mt7622-netgear_wax206.manifest" 2>/dev/null | head -1)
+            else
+              echo "wax206 ($suffix)插件：" >> release_body.txt
+              manifest_file=$(find ./all-firmwares -name "openwrt-mediatek-mt7622-netgear_wax206${suffix}.manifest" 2>/dev/null | head -1)
+            fi
+            if [ -f "$manifest_file" ]; then
+              grep -oP "luci-app(-[a-zA-Z0-9]+)+" "$manifest_file" 2>/dev/null | sort -u | xargs -d '\n' -n5 printf "%-25s %-25s %-25s %-25s %-25s\n" >> release_body.txt || echo "(无插件)" >> release_body.txt
+            else
+              echo "(manifest 文件未找到)" >> release_body.txt
+            fi
           done
 
       - name: 发布固件
