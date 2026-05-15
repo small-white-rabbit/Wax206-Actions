@@ -60,6 +60,14 @@ jobs:
       - name: 检出
         uses: actions/checkout@v4
 
+      - name: 修复脚本执行权限
+        run: |
+          chmod +x wrt_core/pre_clone_action.sh
+          chmod +x wrt_core/update.sh
+          chmod +x sh/build.sh
+          chmod +x diy-part2.sh
+          find wrt_core/packages -name "*.sh" -exec chmod +x {} +
+
       - name: 设置环境变量
         id: set_env
         run: |
@@ -100,10 +108,9 @@ jobs:
       - name: 刷新缓存
         run: |
           if [ -d "./action_build/staging_dir" ]; then
-            find "./action_build/staging_dir" -type d -name "stamp" ! -path "*target*" -print0 2>/dev/null | \
-            while IFS= read -r -d '' dir; do
-              [ -n "$dir" ] && find "$dir" -type f -exec touch {} + 2>/dev/null
-            done
+            echo "清理 staging_dir 中的 stamp 文件，避免缓存状态不一致..."
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+            echo "stamp 文件清理完成"
           fi
 
       - name: 构建固件
@@ -132,9 +139,23 @@ jobs:
         run: |
           cd firmware
           case "${{ matrix.variant }}" in
-            fmwax206) for f in *netgear_wax206*; do [ -f "$f" ] && mv "$f" "${f/netgear_wax206/70m-netgear_wax206}"; done ;;
-            gwax206) for f in *netgear_wax206*; do [ -f "$f" ] && mv "$f" "${f/netgear_wax206/256m-netgear_wax206}"; done ;;
+            fmwax206) 
+              for f in *netgear_wax206*; do 
+                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-70m}"
+              done 
+              echo "已重命名为 70m 版本"
+              ;;
+            gwax206) 
+              for f in *netgear_wax206*; do 
+                [ -f "$f" ] && mv "$f" "${f/netgear_wax206/netgear_wax206-256m}"
+              done 
+              echo "已重命名为 256m 版本"
+              ;;
+            *)
+              echo "原版固件，保持默认名称"
+              ;;
           esac
+          echo "=== 最终固件列表 ==="
           ls -la *wax206* 2>/dev/null || true
 
       - name: 清理临时文件
