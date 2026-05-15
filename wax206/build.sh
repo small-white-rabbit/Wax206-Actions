@@ -176,6 +176,11 @@ reset_feeds_conf() {
     if [[ "$COMMIT_HASH" != "none" ]]; then
         git checkout "$COMMIT_HASH"
     fi
+    # 重置源码后，再次清理 staging_dir 中的 stamp 文件，避免与缓存状态不一致
+    if [[ -d "staging_dir" ]]; then
+        echo "重置源码后清理 staging_dir 中的 stamp 文件..."
+        find staging_dir -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+    fi
     cd - > /dev/null
 }
 
