@@ -191,7 +191,7 @@ update_feeds() {
    
     if ! grep -q "kenzok" "$FEEDS_PATH"; then
         [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-        echo "src-git kenzok https://github.com/kenzok8/openwrt-packages;master" >>"$FEEDS_PATH"
+        echo "src-git kenzok https://github.com/kenzok8/openwrt-packages.git;master" >>"$FEEDS_PATH"
     fi
 
     if ! grep -q "small-package" "$FEEDS_PATH"; then
