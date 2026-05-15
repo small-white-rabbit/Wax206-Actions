@@ -58,7 +58,17 @@ install_feeds() {
                 echo "选择性安装 kenzok 源中的包..."
                 ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
                 ;;
+            openwrt_bandix)
+                # openwrt-bandix 后端
+                echo "安装 openwrt_bandix 源中的包..."
+                ./scripts/feeds install -p openwrt_bandix -f -a
+                ;;
+            luci_app_bandix)
+                # luci-app-bandix 前端
+                echo "安装 luci_app_bandix 源中的包..."
+                ./scripts/feeds install -p luci_app_bandix -f -a
+                ;;
         esac
-        ./scripts/feeds install -f -p "$feed_name"
+        ./scripts/feeds install -f -a -p "$feed_name"
     done
 }

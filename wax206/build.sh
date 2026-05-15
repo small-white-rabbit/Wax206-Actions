@@ -240,6 +240,14 @@ install_feeds() {
                 # kenzok 源选择性安装需要的包，避免与官方源冲突
                 echo "选择性安装 kenzok 源中的包..."
                 ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
+            elif [[ "$feed_name" == "openwrt_bandix" ]]; then
+                # openwrt-bandix 后端
+                echo "安装 openwrt_bandix 源中的包..."
+                ./scripts/feeds install -p openwrt_bandix -f -a
+            elif [[ "$feed_name" == "luci_app_bandix" ]]; then
+                # luci-app-bandix 前端
+                echo "安装 luci_app_bandix 源中的包..."
+                ./scripts/feeds install -p luci_app_bandix -f -a
             else
                 ./scripts/feeds install -f -ap "$feed_name"
             fi
