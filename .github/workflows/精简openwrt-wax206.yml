@@ -78,9 +78,9 @@ jobs:
       - name: 刷新缓存
         run: |
           if [ -d "./action_build/staging_dir" ]; then
-            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
-                find "$dir" -type f -exec touch {} +
-            done
+            echo "清理 staging_dir 中的 stamp 文件，避免缓存状态不一致..."
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+            echo "stamp 文件清理完成"
           fi
 
       - name: 构建固件
