@@ -604,7 +604,7 @@ FIRMWARE_DIR="$BASE_PATH/../firmware"
 mkdir -p "$FIRMWARE_DIR"
 find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
 
-if [[ -d "action_build" ]]; then make clean; fi
+# if [[ -d "action_build" ]]; then make clean; fi
 
 echo "=========================================="
 echo "编译完成！固件已保存到 $FIRMWARE_DIR"
