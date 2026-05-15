@@ -211,6 +211,13 @@ install_custom_feed() {
     echo "正在更新 $custom_feed_name 本地 feed 索引..."
     ./scripts/feeds update "$custom_feed_name"
 
+    echo "正在安装 $custom_feed_name 中的包..."
+    for pkg in "${base_custom_feed_packages[@]}"; do
+        if [ -d "$custom_feed_worktree_dir/$pkg" ]; then
+            ./scripts/feeds install -p "$custom_feed_name" -f "$pkg" || echo "警告: 安装 $pkg 失败"
+        fi
+    done
+
     collect_missing_directories "$custom_feed_worktree_dir" required_feed_dirs missing_feed_dirs
 
     if [ ${#missing_feed_dirs[@]} -ne 0 ]; then
