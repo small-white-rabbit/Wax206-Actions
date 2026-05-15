@@ -60,14 +60,6 @@ jobs:
       - name: 检出
         uses: actions/checkout@v4
 
-      - name: 修复脚本执行权限
-        run: |
-          chmod +x wrt_core/pre_clone_action.sh
-          chmod +x wrt_core/update.sh
-          chmod +x sh/build.sh
-          chmod +x diy-part2.sh
-          find wrt_core/packages -name "*.sh" -exec chmod +x {} +
-
       - name: 设置环境变量
         id: set_env
         run: |
@@ -82,6 +74,14 @@ jobs:
           echo "build_src=${BUILD_SRC:-unknown}" >> $GITHUB_OUTPUT
           
           echo "VARIANT=${{ matrix.variant }}" >> $GITHUB_ENV
+
+      - name: 修复脚本执行权限
+        run: |
+          chmod +x wrt_core/pre_clone_action.sh
+          chmod +x wrt_core/update.sh
+          chmod +x sh/build.sh
+          chmod +x diy-part2.sh
+          find wrt_core/packages -name "*.sh" -exec chmod +x {} +
 
       - name: 克隆固件代码
         run: ./wrt_core/pre_clone_action.sh ${{ matrix.variant }}
