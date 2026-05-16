@@ -90,16 +90,6 @@ BUILD_DIR=$(read_ini_by_key "BUILD_DIR")
 COMMIT_HASH=$(read_ini_by_key "COMMIT_HASH")
 COMMIT_HASH=${COMMIT_HASH:-none}
 
-# 如果 action_build 目录存在，强制使用它
-if [[ -d "action_build" ]]; then
-    BUILD_DIR="action_build"
-fi
-
-# 确保 BUILD_DIR 是绝对路径
-if [[ "$BUILD_DIR" != /* ]]; then
-    BUILD_DIR="$(pwd)/$BUILD_DIR"
-fi
-
 FEEDS_CONF="feeds.conf.default"
 GOLANG_REPO="https://github.com/sbwml/packages_lang_golang"
 GOLANG_BRANCH="26.x"
@@ -114,30 +104,34 @@ clone_source() {
 
     if [[ -d "$BASE_PATH/../action_build" ]]; then
         echo "action_build already exists, skipping clone"
-        return 0
+    else
+        if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BASE_PATH/../action_build"; then
+            echo "错误：克隆仓库 $REPO_URL 失败" >&2
+            exit 1
+        fi
+
+        # 移除国内下载源
+        local mirrors_file="$BASE_PATH/../action_build/scripts/projectsmirrors.json"
+        if [ -f "$mirrors_file" ]; then
+            sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$mirrors_file"
+        fi
     fi
 
-    if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BASE_PATH/../action_build"; then
-        echo "错误：克隆仓库 $REPO_URL 失败" >&2
-        exit 1
-    fi
-
-    # 移除国内下载源
-    local mirrors_file="$BASE_PATH/../action_build/scripts/projectsmirrors.json"
-    if [ -f "$mirrors_file" ]; then
-        sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$mirrors_file"
-    fi
+    # 克隆完成后，强制使用 action_build 作为构建目录
+    BUILD_DIR="$BASE_PATH/../action_build"
+    # 转换为绝对路径
+    BUILD_DIR=$(cd "$BUILD_DIR" && pwd)
+    echo "BUILD_DIR 设置为: $BUILD_DIR"
 }
 
 # ==================== [modules/general.sh] 通用准备 ====================
 clone_repo() {
+    # clone_source 已完成克隆，这里只验证目录存在
     if [[ ! -d "$BUILD_DIR" ]]; then
-        echo "克隆仓库: $REPO_URL 分支: $REPO_BRANCH"
-        if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BUILD_DIR"; then
-            echo "错误：克隆仓库 $REPO_URL 失败" >&2
-            exit 1
-        fi
+        echo "错误：构建目录 $BUILD_DIR 不存在" >&2
+        exit 1
     fi
+    echo "构建目录已就绪: $BUILD_DIR"
 }
 
 clean_up() {
