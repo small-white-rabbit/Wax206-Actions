@@ -170,9 +170,11 @@ clean_up() {
 
 reset_feeds_conf() {
     cd "$BUILD_DIR"
+    # 浅克隆(--depth 1)不会创建远程分支引用(如 origin/main)
+    # 先 fetch 建立 origin/$REPO_BRANCH 引用，再 reset
+    git fetch origin "$REPO_BRANCH"
     git reset --hard "origin/$REPO_BRANCH"
     git clean -f -d
-    git pull
     if [[ "$COMMIT_HASH" != "none" ]]; then
         git checkout "$COMMIT_HASH"
     fi
