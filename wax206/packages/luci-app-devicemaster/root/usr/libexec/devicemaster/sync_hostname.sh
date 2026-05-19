@@ -62,13 +62,16 @@ log_msg "START: $MAC -> $NAME ($IP)"
 # Step 1: Remove ALL existing host entries for this MAC
 # Handle index shifting: after delete, indices change
 # Strategy: keep scanning from 0, break and restart after each deletion
+# IMPORTANT: Compare MACs case-insensitively (UCI may store in different cases)
+MAC_LOWER=$(echo "$MAC" | tr 'A-F' 'a-f')
 deleted=0
 while true; do
     found=0
     idx=0
     while uci -q get "dhcp.@host[$idx].mac" >/dev/null 2>&1; do
         hm=$(uci -q get "dhcp.@host[$idx].mac")
-        if [ "$hm" = "$MAC" ]; then
+        hm_lower=$(echo "$hm" | tr 'A-F' 'a-f')
+        if [ "$hm_lower" = "$MAC_LOWER" ]; then
             uci -q delete "dhcp.@host[$idx]"
             deleted=$((deleted + 1))
             found=1
@@ -97,7 +100,8 @@ while true; do
         # Extract index from dhcp entry (format: dhcp.@host[N].name='...')
         dhcp_idx=$(echo "$dhcp_line" | grep -o '@host\[[0-9]*\]' | grep -o '[0-9]*')
         dhcp_mac=$(uci -q get "dhcp.@host[$dhcp_idx].mac" 2>/dev/null)
-        if [ "$dhcp_mac" != "$MAC" ]; then
+        dhcp_mac_lower=$(echo "$dhcp_mac" | tr 'A-F' 'a-f')
+        if [ "$dhcp_mac_lower" != "$MAC_LOWER" ]; then
             dup_dhcp="$dhcp_line"
         fi
     fi
@@ -110,7 +114,8 @@ while true; do
         dm_section=$(echo "$dm_line" | grep -o '@device\[[0-9]*\]')
         [ -z "$dm_section" ] && dm_section=$(echo "$dm_line" | sed 's/^devicemaster\.\([^=]*\)\..*/\1/')
         dm_mac=$(uci -q get "devicemaster.$dm_section.mac" 2>/dev/null)
-        if [ "$dm_mac" != "$MAC" ]; then
+        dm_mac_lower=$(echo "$dm_mac" | tr 'A-F' 'a-f')
+        if [ "$dm_mac_lower" != "$MAC_LOWER" ]; then
             dup_dm_name="$dm_line"
         fi
     fi
@@ -123,7 +128,8 @@ while true; do
         dm_section=$(echo "$dm_line" | grep -o '@device\[[0-9]*\]')
         [ -z "$dm_section" ] && dm_section=$(echo "$dm_line" | sed 's/^devicemaster\.\([^=]*\)\..*/\1/')
         dm_mac=$(uci -q get "devicemaster.$dm_section.mac" 2>/dev/null)
-        if [ "$dm_mac" != "$MAC" ]; then
+        dm_mac_lower=$(echo "$dm_mac" | tr 'A-F' 'a-f')
+        if [ "$dm_mac_lower" != "$MAC_LOWER" ]; then
             dup_dm_hostname="$dm_line"
         fi
     fi
