@@ -277,6 +277,11 @@ save_device_to_uci() {
     fi
 
     if [ -z "$section" ] || [ "$section" = "new" ]; then
+        # Double-check: use uci show to verify MAC doesn't already exist
+        # (file parsing may fail due to CRLF or format issues)
+        if uci -q show devicemaster 2>/dev/null | grep -qi "\.mac='$mac'"; then
+            return
+        fi
         section=$(uci add devicemaster device 2>/dev/null)
         [ -z "$section" ] && return
     fi

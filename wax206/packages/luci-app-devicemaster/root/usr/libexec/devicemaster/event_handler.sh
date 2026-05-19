@@ -1052,7 +1052,8 @@ cleanup_duplicate_devices() {
 
     rm -f "$seen_file"
 
-    for dup_idx in $to_delete; do
+    # Delete from highest index first to avoid index shift
+    for dup_idx in $(echo "$to_delete" | tr ' ' '\n' | sort -rn); do
         uci -q delete "devicemaster.@device[$dup_idx]"
     done
 
@@ -1221,6 +1222,10 @@ discover_all() {
             hostname=$(sanitize_hostname "$hostname")
 
             register_device "$mac" "$ip" "$hostname"
+
+            # Add new MAC to cache to prevent duplicate registration in same loop
+            local new_count=$(wc -l < "$uci_mac_cache" 2>/dev/null)
+            echo "$mac $new_count" >> "$uci_mac_cache"
         fi
     done < "$arp_tmp"
     rm -f "$arp_tmp" "$uci_mac_cache"
