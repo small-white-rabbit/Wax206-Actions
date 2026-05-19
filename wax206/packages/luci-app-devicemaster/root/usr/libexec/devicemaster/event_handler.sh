@@ -643,10 +643,10 @@ identify_type() {
 MAIN_LEASES_CACHE="/tmp/dm_main_leases"
 
 fetch_main_router_leases() {
-    # Skip if cache is fresh (< 120 seconds old)
+    # Skip if cache is fresh (< 24 hours old)
     if [ -f "$MAIN_LEASES_CACHE" ]; then
         local cache_age=$(( $(date +%s) - $(stat -c %Y "$MAIN_LEASES_CACHE" 2>/dev/null || echo 0) ))
-        [ "$cache_age" -lt 120 ] && return 0
+        [ "$cache_age" -lt 86400 ] && return 0
     fi
 
     # Get main router IP from default gateway
