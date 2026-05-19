@@ -410,7 +410,11 @@ detect_type_by_traffic() {
     local conntrack="/proc/net/nf_conntrack"
     [ ! -f "$conntrack" ] && { echo ""; return; }
 
-    local ports=$(grep "src=$ip " "$conntrack" 2>/dev/null | grep 'dport=' | sed 's/.*dport=//' | awk '{print $1}' | sort -u)
+    # Extract all dport values from connections where device is src (forward direction)
+    # conntrack line: "proto src=<IP> dst=<IP> sport=X dport=Y ... src=<IP> dst=<IP> sport=X dport=Y"
+    # We grep for lines where device is src=, then extract all dport= values
+    # Even if some are reverse direction, we're checking for known port patterns (5223/5228/etc)
+    local ports=$(grep "src=$ip " "$conntrack" 2>/dev/null | grep -o 'dport=[0-9]*' | sed 's/dport=//' | sort -u)
 
     local has_phone_ports=0
     local has_pc_ports=0
@@ -418,10 +422,10 @@ detect_type_by_traffic() {
 
     for port in $ports; do
         case "$port" in
-            5228) has_phone_ports=1 ;;
-            554|8554|5060|5061|5555) has_phone_ports=1 ;;
-            1883|8883|5683|5684|49152|49153|6668|9999|8080|8443) has_iot_ports=1 ;;
-            3389|22|445|139|135|5900|5901) has_pc_ports=1 ;;
+            5223|5228) has_phone_ports=1 ;;
+            554|8554|5060|5061|5555|5260) has_phone_ports=1 ;;
+            1883|8883|5683|5684|49152|49153|6668|9999|8080|8443|8529) has_iot_ports=1 ;;
+            3389|22|445|139|135|5900|5901|2011) has_pc_ports=1 ;;
         esac
     done
 
@@ -615,14 +619,14 @@ identify_type() {
     local hostname="$3"
     local vendor="$4"
 
-    # First try: vendor + hostname based detection
+    # First try: vendor + hostname based detection (only if result is meaningful)
     local dtype=$(detect_device_type "$mac" "$hostname" "$vendor")
     if [ -n "$dtype" ] && [ "$dtype" != "unknown" ]; then
         echo "$dtype"
         return
     fi
 
-    # Second try: traffic pattern analysis
+    # Second try: traffic pattern analysis (critical for LAA/randomized MACs with no OUI)
     if [ -n "$ip" ]; then
         local dtype=$(detect_type_by_traffic "$mac")
         if [ -n "$dtype" ]; then
@@ -1151,17 +1155,30 @@ discover_all() {
 
         # Fast check: is MAC in our set?
         if echo "$mac_set" | grep -q " $mac "; then
-            # Device exists - update IP only (skip expensive re-identification in batch mode)
-            # Re-identification should be done via 'reidentify' command, not discover
-            local dhcp_ip=$(awk -v m="$mac" 'tolower($2) == m {print $3; exit}' /tmp/dhcp.leases 2>/dev/null)
-            local effective_ip="$ip"
-            [ -n "$dhcp_ip" ] && effective_ip="$dhcp_ip"
-            # Find the device and update IP
+            # Find the device and update IP + re-identify if type is unknown
             local update_idx=0
             while uci -q get "devicemaster.@device[$update_idx].mac" >/dev/null 2>&1; do
                 local check_mac=$(uci -q get "devicemaster.@device[$update_idx].mac" | tr 'A-F' 'a-f')
                 if [ "$check_mac" = "$mac" ]; then
+                    local dhcp_ip=$(awk -v m="$mac" 'tolower($2) == m {print $3; exit}' /tmp/dhcp.leases 2>/dev/null)
+                    local effective_ip="$ip"
+                    [ -n "$dhcp_ip" ] && effective_ip="$dhcp_ip"
                     uci -q set "devicemaster.@device[$update_idx].last_ip=$effective_ip"
+
+                    # Re-identify if type is unknown (LAA or no match from first registration)
+                    local current_type=$(uci -q get "devicemaster.@device[$update_idx].type")
+                    if [ "$current_type" = "unknown" ]; then
+                        local hostname=$(uci -q get "devicemaster.@device[$update_idx].hostname")
+                        [ -z "$hostname" ] && hostname=$(awk -v m="$mac" 'tolower($2) == m {print $4; exit}' /tmp/dhcp.leases 2>/dev/null)
+                        [ -z "$hostname" ] || [ "$hostname" = "*" ] && hostname=$(probe_hostname "$effective_ip" "$mac")
+                        hostname=$(sanitize_hostname "$hostname")
+                        local current_vendor=$(uci -q get "devicemaster.@device[$update_idx].vendor")
+                        local new_type=$(identify_type "$mac" "$effective_ip" "$hostname" "$current_vendor")
+                        if [ -n "$new_type" ] && [ "$new_type" != "unknown" ]; then
+                            uci -q set "devicemaster.@device[$update_idx].type=$new_type"
+                            log_msg "Re-identified device $mac: type=$new_type (via traffic analysis)"
+                        fi
+                    fi
                     modified=1
                     break
                 fi
