@@ -663,18 +663,18 @@ fetch_main_router_leases() {
     [ -z "$main_user" ] && main_user="root"
     [ -z "$main_pass" ] && return 1
 
-    # Step 1: Login to main router via ubus RPC
+    # Step 1: Login to main router via ubus RPC (timeout 5s to avoid blocking discover_all)
     local login_json="{\"jsonrpc\":\"2.0\",\"method\":\"call\",\"params\":[\"00000000000000000000000000000000\",\"session\",\"login\",{\"username\":\"$main_user\",\"password\":\"$main_pass\"}]}"
-    local login_result=$(wget -qO- --post-data="$login_json" \
+    local login_result=$(wget -qO- --timeout=5 --post-data="$login_json" \
         --header='Content-Type: application/json' \
         "http://${main_router}/ubus" 2>/dev/null)
 
     local sid=$(echo "$login_result" | jsonfilter -e '$.result[1].ubus_rpc_session' 2>/dev/null)
     [ -z "$sid" ] && return 1
 
-    # Step 2: Call luci-rpc getDHCPLeases
+    # Step 2: Call luci-rpc getDHCPLeases (timeout 5s)
     local leases_json="{\"jsonrpc\":\"2.0\",\"method\":\"call\",\"params\":[\"$sid\",\"luci-rpc\",\"getDHCPLeases\",{}]}"
-    local leases_result=$(wget -qO- --post-data="$leases_json" \
+    local leases_result=$(wget -qO- --timeout=5 --post-data="$leases_json" \
         --header='Content-Type: application/json' \
         "http://${main_router}/ubus" 2>/dev/null)
 
