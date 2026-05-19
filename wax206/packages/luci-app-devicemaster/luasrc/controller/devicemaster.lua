@@ -844,6 +844,10 @@ local CACHE_TTL = 15
 -- Uses response cache to reduce load on hostapd/netifd
 -- ============================================================
 function api_status()
+    -- Mark page as active (device_monitor uses this to decide discover frequency)
+    local f = io.open("/tmp/dm_page_active", "w")
+    if f then f:write(tostring(os.time())); f:close() end
+
     -- Return cached response if still fresh (eliminates ALL subprocess spawning)
     local now = os.time()
     if response_cache_str and now - response_cache_time < CACHE_TTL then
