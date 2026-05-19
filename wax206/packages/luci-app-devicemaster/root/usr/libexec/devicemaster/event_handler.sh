@@ -798,8 +798,16 @@ probe_hostname() {
 sanitize_hostname() {
     local raw="$1"
     [ -z "$raw" ] && return
-    # Keep only safe ASCII chars: a-z A-Z 0-9 - _ .
-    local clean=$(echo "$raw" | tr -cd 'a-zA-Z0-9._-' | sed 's/^[._-]*//;s/[._-]*$//')
+
+    # Fix Apple mDNS names: Unicode private-use chars get encoded as visible digits
+    # e.g. "iPad032pro032M4" -> "iPad Pro M4", "iPhone03215s032" -> "iPhone 15s"
+    # Pattern: digit sequence (032,033,etc) between lowercase/uppercase transitions
+    raw=$(echo "$raw" | sed -e 's/\([a-zA-Z]\)0\{1,2\}[0-9]\{2,3\}\([a-zA-Z]\)/\1 \2/g' \
+                            -e 's/\([a-zA-Z]\)0\{1,2\}[0-9]\{2,3\}$/\1/g' \
+                            -e 's/^0\{1,2\}[0-9]\{2,3\}\([a-zA-Z]\)/\1/g')
+
+    # Keep only safe ASCII chars: a-z A-Z 0-9 - _ . space
+    local clean=$(echo "$raw" | tr -cd 'a-zA-Z0-9._- ' | sed 's/^[._- ]*//;s/[._- ]*$//;s/  */ /g')
     # If result is too short or empty, discard
     if [ ${#clean} -lt 2 ]; then
         return
