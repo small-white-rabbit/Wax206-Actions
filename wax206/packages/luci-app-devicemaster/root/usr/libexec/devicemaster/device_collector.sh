@@ -81,20 +81,21 @@ mdns_probe_ip() {
     local ip="$1"
     local result=""
 
-    # Method 1: avahi-browse (most reliable, if installed)
-    if command -v avahi-browse >/dev/null 2>&1; then
-        result=$(avahi-browse -a -t -r -p 2>/dev/null | grep -i "$ip" | head -1)
-        if [ -n "$result" ]; then
-            echo "$result" | awk -F';' '{print $4}' | sed 's/\.local$//'
-            return
-        fi
-    fi
-
-    # Method 2: avahi-resolve (if installed)
+    # Method 1: avahi-resolve returns clean hostname (e.g. "iPad-pro-M4.local")
+    # avahi-browse returns raw mDNS name with escape codes (e.g. "iPad\032pro\032M4")
     if command -v avahi-resolve >/dev/null 2>&1; then
         result=$(avahi-resolve-host-name -a "$ip" 2>/dev/null | awk '{print $2}')
         if [ -n "$result" ]; then
             echo "$result" | sed 's/\.local$//'
+            return
+        fi
+    fi
+
+    # Method 2: avahi-browse (fallback, may contain escape codes)
+    if command -v avahi-browse >/dev/null 2>&1; then
+        result=$(avahi-browse -a -t -r -p 2>/dev/null | grep -i "$ip" | head -1)
+        if [ -n "$result" ]; then
+            echo "$result" | awk -F';' '{print $4}' | sed 's/\.local$//'
             return
         fi
     fi
