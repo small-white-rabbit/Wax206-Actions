@@ -28,6 +28,24 @@ DHCP_LEASES="/tmp/dhcp.leases"
 NLBWMON_CACHE="/tmp/devicemaster_nlbwmon_cache"
 MDNS_CACHE="/tmp/devicemaster_mdns_cache"
 
+# ============================================================
+# Mesh Node Detection
+# ============================================================
+
+# Check if this device is a mesh child node (not the main router)
+# Mesh child nodes should not modify dhcp config
+is_mesh_child_node() {
+    # Check if wpad/wpad-mesh is running and this is a mesh station
+    local mesh_mode=$(uci -q get wireless.mesh0 2>/dev/null || uci -q get wireless.mesh0_0 2>/dev/null)
+    local dhcp_enabled=$(uci -q get dhcp.lan.ignore 2>/dev/null)
+    
+    # If mesh interface exists and dhcp is disabled (common in mesh child nodes), skip dhcp modifications
+    if [ -n "$mesh_mode" ] && [ "$dhcp_enabled" = "1" ]; then
+        return 0
+    fi
+    return 1
+}
+
 log_msg() {
     logger -t devicemaster-event "$1"
 }
@@ -907,9 +925,11 @@ register_device() {
     log_msg "Registered $mac as $vendor ($devtype) at $ip"
 
     # Sync to dnsmasq static lease (via dedicated script to avoid index bugs)
-    # Run synchronously - DHCP event handler must complete before returning to dnsmasq
-    if [ -n "$hostname" ] && [ -n "$ip" ]; then
-        /usr/libexec/devicemaster/sync_hostname.sh "$mac" "$hostname" "$ip" >/dev/null 2>&1
+    # Skip on mesh child nodes - they should not modify dhcp config
+    if ! is_mesh_child_node; then
+        if [ -n "$hostname" ] && [ -n "$ip" ]; then
+            /usr/libexec/devicemaster/sync_hostname.sh "$mac" "$hostname" "$ip" >/dev/null 2>&1
+        fi
     fi
 }
 

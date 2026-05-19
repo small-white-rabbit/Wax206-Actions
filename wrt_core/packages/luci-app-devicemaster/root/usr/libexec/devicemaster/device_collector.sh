@@ -289,6 +289,17 @@ save_device_to_uci() {
     sync_to_dnsmasq "$mac" "$ip" "$display_name"
 }
 
+# Check if this device is a mesh child node (not the main router)
+# Mesh child nodes should not modify dhcp config
+is_mesh_child_node() {
+    local mesh_mode=$(uci -q get wireless.mesh0 2>/dev/null || uci -q get wireless.mesh0_0 2>/dev/null)
+    local dhcp_enabled=$(uci -q get dhcp.lan.ignore 2>/dev/null)
+    if [ -n "$mesh_mode" ] && [ "$dhcp_enabled" = "1" ]; then
+        return 0
+    fi
+    return 1
+}
+
 # Sync device name to dnsmasq static lease
 # MAC + hostname = strong binding (hostname follows MAC)
 # MAC + IP = weak binding (IP updates when device gets new IP)
@@ -298,6 +309,9 @@ sync_to_dnsmasq() {
     local name="$3"
 
     [ -z "$mac" ] || [ -z "$ip" ] || [ -z "$name" ] && return
+
+    # Skip on mesh child nodes
+    is_mesh_child_node && return
 
     # Sanitize hostname for dnsmasq: only allow a-z, A-Z, 0-9, -
     # dnsmasq rejects hostnames with other characters (e.g., Chinese)
