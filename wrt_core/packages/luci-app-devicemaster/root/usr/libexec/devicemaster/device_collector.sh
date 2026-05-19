@@ -303,6 +303,11 @@ is_mesh_child_node() {
 # Check if this device is the mesh main router (has DHCP server enabled)
 # Only main router should modify dhcp config
 is_mesh_main_router() {
+    # Emergency override: if force_dhcp_sync flag exists, always allow
+    if [ -f "/tmp/devicemaster_force_dhcp_sync" ]; then
+        return 0
+    fi
+    
     # Must have dhcp server enabled on lan interface
     local dhcp_ignore=$(uci -q get dhcp.lan.ignore 2>/dev/null)
     

@@ -49,11 +49,18 @@ is_mesh_child_node() {
 # Check if this device is the mesh main router (has DHCP server enabled)
 # Only main router should modify dhcp config
 is_mesh_main_router() {
+    # Emergency override: if force_dhcp_sync flag exists, always allow
+    if [ -f "/tmp/devicemaster_force_dhcp_sync" ]; then
+        log_msg "Emergency override: force_dhcp_sync flag detected, allowing dhcp sync"
+        return 0
+    fi
+    
     # Must have dhcp server enabled on lan interface
     local dhcp_ignore=$(uci -q get dhcp.lan.ignore 2>/dev/null)
     
     # dhcp_ignore should be 0 or empty (default is to serve dhcp)
     if [ "$dhcp_ignore" = "1" ]; then
+        log_msg "DHCP server disabled (dhcp.lan.ignore=1), skipping dhcp sync"
         return 1
     fi
     
@@ -62,11 +69,13 @@ is_mesh_main_router() {
     local dhcp_limit=$(uci -q get dhcp.lan.limit 2>/dev/null)
     
     if [ -z "$dhcp_start" ] || [ -z "$dhcp_limit" ]; then
+        log_msg "DHCP range not configured (start=$dhcp_start, limit=$dhcp_limit), skipping dhcp sync"
         return 1
     fi
     
     # Must be able to read /tmp/dhcp.leases (has active dhcp server)
     if [ ! -f "/tmp/dhcp.leases" ]; then
+        log_msg "No dhcp.leases file found, skipping dhcp sync"
         return 1
     fi
     
