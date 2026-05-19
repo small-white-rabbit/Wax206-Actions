@@ -1132,13 +1132,7 @@ discover_all() {
     # Cleanup any existing duplicate UCI entries
     cleanup_duplicate_devices
 
-    local arp_tmp="/tmp/dm_discover_arp"
-    awk 'NR>1 && $4!="00:00:00:00:00:00" && $3!="0x0" {print $1, $4}' /proc/net/arp 2>/dev/null > "$arp_tmp"
-
-    # Pre-fetch main router leases once for all devices (cached 60s)
-    fetch_main_router_leases
-
-    # Build a simple MAC set for fast lookup (in-memory, no index dependency)
+    # Build MAC set first (needed for both ARP and DHCP discovery)
     local mac_set=""
     local idx=0
     while uci -q get "devicemaster.@device[$idx].mac" >/dev/null 2>&1; do
@@ -1147,6 +1141,29 @@ discover_all() {
         mac_set="$mac_set $stored_lower "
         idx=$((idx + 1))
     done
+
+    # Pre-fetch main router leases once for all devices (cached 60s)
+    fetch_main_router_leases
+
+    local arp_tmp="/tmp/dm_discover_arp"
+    awk 'NR>1 && $4!="00:00:00:00:00:00" && $3!="0x0" {print $1, $4}' /proc/net/arp 2>/dev/null > "$arp_tmp"
+
+    # Also build DHCP-only device list (devices in leases but not in ARP)
+    # These are devices that had DHCP leases but are currently offline (not in ARP)
+    local dhcp_tmp="/tmp/dm_discover_dhcp"
+    > "$dhcp_tmp"
+    while IFS=" " read -r ts mac ip hostname rest; do
+        [ -z "$mac" ] && continue
+        mac=$(echo "$mac" | tr 'A-F' 'a-f')
+        # Skip if already in UCI
+        echo "$mac_set" | grep -q " $mac " && continue
+        # Skip if already discovered from ARP this run
+        grep -q " $mac$" "$arp_tmp" 2>/dev/null && continue
+        # Skip entries with no IP (truly offline)
+        [ -z "$ip" ] || [ "$ip" = "0.0.0.0" ] && continue
+        # Valid: add to DHCP-only list
+        echo "$ip $mac" >> "$dhcp_tmp"
+    done < /tmp/dhcp.leases 2>/dev/null
 
     local modified=0
     while read -r ip mac; do
@@ -1214,6 +1231,27 @@ discover_all() {
         modified=1
     done < "$arp_tmp"
     rm -f "$arp_tmp"
+
+    # Also discover DHCP-only devices (in leases but not in ARP, e.g. offline devices)
+    if [ -s "$dhcp_tmp" ]; then
+        while read -r ip mac; do
+            [ -z "$mac" ] && continue
+            mac=$(echo "$mac" | tr 'A-F' 'a-f')
+            # Double-check not already in UCI (race condition)
+            if mac_exists_in_uci "$mac" "$ip"; then
+                mac_set="$mac_set $mac "
+                modified=1
+                continue
+            fi
+            # Get hostname from DHCP leases
+            local hostname=$(grep -i " $mac " /tmp/dhcp.leases 2>/dev/null | awk '{print $4}')
+            [ "$hostname" = "*" ] && hostname=""
+            register_device "$mac" "$ip" "$hostname"
+            mac_set="$mac_set $mac "
+            modified=1
+        done < "$dhcp_tmp"
+    fi
+    rm -f "$dhcp_tmp"
 
     uci -q commit devicemaster 2>/dev/null
     rmdir "$lock" 2>/dev/null
