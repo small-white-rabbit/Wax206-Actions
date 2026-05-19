@@ -398,6 +398,64 @@ detect_by_nlbwmon() {
 # ============================================================
 # Level 7: Traffic pattern analysis (conntrack ports)
 # ============================================================
+
+# Level 7.5: TTL-based OS detection (passive, no extra traffic)
+# TTL=64 → Linux/Android/macOS
+# TTL=128 → Windows
+# TTL=255 → Network equipment (Cisco, OpenWrt, etc.)
+detect_os_by_ttl() {
+    local ip="$1"
+    [ -z "$ip" ] && { echo ""; return; }
+
+    local ttl=$(ping -c 1 -W 2 "$ip" 2>/dev/null | grep -o 'ttl=[0-9]*' | cut -d= -f2)
+    [ -z "$ttl" ] && { echo ""; return; }
+
+    case "$ttl" in
+        64)  echo "Linux" ;;
+        128) echo "Windows" ;;
+        255) echo "Network" ;;
+        *)   echo "" ;;
+    esac
+}
+
+# Level 7.6: Infer vendor from TTL + traffic ports combined
+detect_vendor_by_traffic() {
+    local mac="$1"
+    local ip="$2"
+    [ -z "$ip" ] && { echo ""; return; }
+
+    local os=$(detect_os_by_ttl "$ip")
+    local ttype=$(detect_type_by_traffic "$mac")
+
+    # Combine OS + traffic type for vendor inference
+    case "$os" in
+        Linux)
+            case "$ttype" in
+                phone) echo "Android" ;;
+                pc)    echo "Linux" ;;
+                iot)   echo "IoT Device" ;;
+                *)     echo "Linux/Android" ;;
+            esac
+            return
+            ;;
+        Windows)
+            echo "Microsoft"
+            return
+            ;;
+        Network)
+            echo "Network Device"
+            return
+            ;;
+    esac
+
+    # No TTL result but have traffic type
+    case "$ttype" in
+        phone) echo "Mobile Device" ;;
+        pc)    echo "Computer" ;;
+        iot)   echo "IoT Device" ;;
+    esac
+}
+
 detect_type_by_traffic() {
     local mac="$1"
     local ip=$(grep -i "$mac" "$ARP_TABLE" 2>/dev/null | awk '{print $1}' | head -1)
@@ -595,9 +653,19 @@ identify_vendor() {
         return
     fi
 
-    # No vendor identified
+    # No vendor identified from L1-L6
+    # For LAA devices, try TTL + traffic analysis as last resort (Level 7.5/7.6)
+    if [ "$is_laa" = "1" ] && [ -n "$ip" ]; then
+        local l7_vendor=$(detect_vendor_by_traffic "$mac" "$ip")
+        if [ -n "$l7_vendor" ]; then
+            echo "$l7_vendor"
+            return
+        fi
+    fi
+
+    # Truly unknown
     if [ "$is_laa" = "1" ]; then
-        echo "LAA"
+        echo "LAA Device"
     fi
     echo ""
 }
@@ -618,13 +686,33 @@ identify_type() {
         return
     fi
 
-    # Second try: traffic pattern analysis
+    # Second try: traffic pattern analysis (conntrack ports)
     if [ -n "$ip" ]; then
         local dtype=$(detect_type_by_traffic "$mac")
         if [ -n "$dtype" ]; then
             echo "$dtype"
             return
         fi
+    fi
+
+    # Third try: TTL-based OS detection for LAA/unknown devices
+    if [ -n "$ip" ]; then
+        local os=$(detect_os_by_ttl "$ip")
+        case "$os" in
+            Linux)
+                # Default to phone for TTL=64 (covers Android + iOS + macOS)
+                echo "phone"
+                return
+                ;;
+            Windows)
+                echo "pc"
+                return
+                ;;
+            Network)
+                echo "network"
+                return
+                ;;
+        esac
     fi
 
     echo "unknown"
@@ -753,7 +841,25 @@ probe_hostname() {
         fi
     fi
 
-    # Method 2: Main router DHCP leases (via SSH, cached)
+    # Method 2: UCI dhcp host config (OpenWrt static leases)
+    # This is where dnsmasq stores hostnames from connected stations
+    if [ -n "$mac" ]; then
+        local mac_lower=$(echo "$mac" | tr 'A-F' 'a-f')
+        local idx=0
+        while uci -q get "dhcp.@host[$idx].mac" >/dev/null 2>&1; do
+            local cfg_mac=$(uci -q get "dhcp.@host[$idx].mac" 2>/dev/null | tr 'A-F' 'a-f')
+            if [ "$cfg_mac" = "$mac_lower" ]; then
+                result=$(uci -q get "dhcp.@host[$idx].name" 2>/dev/null)
+                if [ -n "$result" ]; then
+                    echo "$result"
+                    return
+                fi
+            fi
+            idx=$((idx + 1))
+        done
+    fi
+
+    # Method 3: Main router DHCP leases (via SSH, cached) - for mesh sub-nodes
     if [ -n "$mac" ]; then
         fetch_main_router_leases
         result=$(get_hostname_from_main_leases "$mac")
@@ -763,7 +869,7 @@ probe_hostname() {
         fi
     fi
 
-    # Method 3: DNS reverse lookup via local dnsmasq (~10ms)
+    # Method 4: DNS reverse lookup via local dnsmasq (~10ms)
     if command -v nslookup >/dev/null 2>&1; then
         result=$(nslookup "$ip" 127.0.0.1 2>/dev/null | grep -i "name = " | head -1 | sed 's/.*name = //' | sed 's/\..*//')
         if [ -n "$result" ]; then
@@ -778,7 +884,7 @@ probe_hostname() {
         fi
     fi
 
-    # Method 4: mDNS reverse resolve (slower, ~500ms)
+    # Method 5: mDNS reverse resolve (slower, ~500ms)
     # Only used when PROBE_MDNS=1 (set by reidentify, not discover)
     if [ "${PROBE_MDNS:-0}" = "1" ] && command -v avahi-resolve >/dev/null 2>&1; then
         result=$(avahi-resolve -a "$ip" 2>/dev/null | awk '{print $2}' | sed 's/\.local$//')
