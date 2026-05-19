@@ -231,6 +231,8 @@ main() {
         # Sub-node: push stations to master periodically
         local now=$(date +%s)
         if [ $((now - sub_last_report)) -ge $SUB_REPORT_INTERVAL ]; then
+            # Write local WiFi stations to cache file first (needed by push_to_master)
+            write_sub_stations
             push_to_master
             sub_last_report=$now
         fi

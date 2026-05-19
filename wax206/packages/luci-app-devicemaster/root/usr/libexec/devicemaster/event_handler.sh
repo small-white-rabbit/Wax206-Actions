@@ -119,7 +119,7 @@ lookup_oui_remote() {
     local mac="$1"
     if [ -x "$OUI_LOOKUP" ]; then
         local vendor=$($OUI_LOOKUP lookup "$mac" 2>/dev/null)
-        if [ -n "$vendor" ] && [ "$vendor" != "Unknown" ]; then
+        if [ -n "$vendor" ] && [ "$vendor" != "Unknown" ] && [ "$vendor" != "LAA" ]; then
             echo "$vendor" | sed 's/ Co\..*$//'
             return
         fi
@@ -247,11 +247,11 @@ infer_vendor_from_hostname() {
             _dm_try_vendor "Samsung" 3 ;;
         *note10*|*note20*|*note21*)
             _dm_try_vendor "Samsung" 5 ;;
-        *a[0-9][0-9]*|*a[0-9][0-9]-*)
+        *galaxy*a*|*sm-a*|*samsung*a*|*samsung*a[0-9]*|*galaxy*a[0-9]*|*sm-a[0-9]*)
             _dm_try_vendor "Samsung" 2 ;;
         *samsung*|*galaxy*)
             _dm_try_vendor "Samsung" 7 ;;
-        *j[0-9]*|*m[0-9][0-9]*)
+        *galaxy*j*|*sm-j*|*samsung*j*|*j[0-9][0-9]-galaxy|*j[0-9][0-9]-samsung)
             _dm_try_vendor "Samsung" 2 ;;
     esac
 
@@ -259,7 +259,7 @@ infer_vendor_from_hostname() {
     case "$h" in
         *mate[0-9]*|*mate-[0-9]*)
             _dm_try_vendor "Huawei" 4 ;;
-        *p[0-9][0-9]*|*p[0-9][0-9]-*)
+        *huawei*p*|*honor*p*|*p[0-9][0-9]*|*p[0-9][0-9]-*)
             _dm_try_vendor "Huawei" 2 ;;
         *nova[0-9]*)
             _dm_try_vendor "Huawei" 4 ;;
@@ -484,17 +484,21 @@ detect_device_type() {
     local hostname="$2"
     local vendor="$3"
 
-    # Stage 1: Match by vendor
+    # Stage 1: Match by vendor (order matters: specific vendors first, generic second)
     local v=$(echo "$vendor" | tr 'A-Z' 'a-z')
     case "$v" in
-        *apple*|*samsung*|*xiaomi*|*huawei*|*oppo*|*vivo*|*oneplus*|*realme*|*google*|*android*|*nokia*|*motorola*|*sony*|*lg*|*htc*|*blackberry*|*zte*|*lenovo*|*asus*|*microsoft*|*honor*|*meizu*)
+        # Network设备厂商（可能与phone厂商重叠的放前面，防止误匹配）
+        *xiaomi*|*cisco*|*tp-link*|*netgear*|*ubiquiti*|*mikrotik*|*hiwifi*|*mercury*|*comheart*|*telecom*)
+            echo "network"; return ;;
+        # Phone厂商
+        *apple*|*samsung*|*huawei*|*oppo*|*vivo*|*oneplus*|*realme*|*google*|*android*|*nokia*|*motorola*|*sony*|*lg*|*htc*|*blackberry*|*zte*|*lenovo*|*asus*|*microsoft*|*honor*|*meizu*)
             echo "phone"; return ;;
+        # PC厂商
         *dell*|*hp*|*acer*|*msi*|*razer*|*intel*|*realtek*|*windows*|*giga*|*gigabyte*)
             echo "pc"; return ;;
+        # IoT厂商
         *espressif*|*tuya*|*broadlink*|*yeelight*|*midea*|*haier*|*brother*|*epson*|*canon*)
             echo "iot"; return ;;
-        *cisco*|*tp-link*|*netgear*|*ubiquiti*|*mikrotik*|*hiwifi*|*mercury*|*xiaomi*|*comheart*|*telecom*)
-            echo "network"; return ;;
     esac
 
     # Stage 2: Match by hostname (structured prefix + keyword)
@@ -606,6 +610,7 @@ identify_vendor() {
     # No vendor identified
     if [ "$is_laa" = "1" ]; then
         echo "LAA"
+        return
     fi
     echo ""
 }
@@ -648,8 +653,9 @@ MAIN_LEASES_CACHE="/tmp/dm_main_leases"
 
 fetch_main_router_leases() {
     # Skip if cache is fresh (< 24 hours old)
+    # Cache file format: first line = timestamp, subsequent lines = lease data
     if [ -f "$MAIN_LEASES_CACHE" ]; then
-        local cache_age=$(( $(date +%s) - $(stat -c %Y "$MAIN_LEASES_CACHE" 2>/dev/null || echo 0) ))
+        local cache_age=$(( $(date +%s) - $(sed -n '1p' "$MAIN_LEASES_CACHE" 2>/dev/null) ))
         [ "$cache_age" -lt 86400 ] && return 0
     fi
 
@@ -701,7 +707,7 @@ fetch_main_router_leases() {
                 echo "${l_mac} ${l_ip} ${l_hostname}"
             fi
             i=$((i + 1))
-        done > "$MAIN_LEASES_CACHE"
+        done >> "$MAIN_LEASES_CACHE"
     else
         # Fallback: use grep + sed for basic parsing
         echo "$leases_result" | sed 's/},{/}\n{/g' | \
@@ -710,11 +716,16 @@ fetch_main_router_leases() {
             while IFS=' ' read -r l_mac l_ip l_hostname; do
                 case "$l_hostname" in ""|"*"|"-"|unknown|wlan0|lan) continue ;; esac
                 echo "${l_mac} ${l_ip} ${l_hostname}"
-            done > "$MAIN_LEASES_CACHE"
+            done >> "$MAIN_LEASES_CACHE"
     fi
 
+    # Prepend timestamp as first line (BusyBox-compatible: no stat -c)
+    local ts=$(date +%s)
+    local data=$(cat "$MAIN_LEASES_CACHE" 2>/dev/null)
+    { echo "$ts"; echo "$data"; } > "$MAIN_LEASES_CACHE"
+
     if [ -s "$MAIN_LEASES_CACHE" ]; then
-        log_msg "Fetched DHCP leases from main router ($main_router): $(wc -l < "$MAIN_LEASES_CACHE") entries"
+        log_msg "Fetched DHCP leases from main router ($main_router): $(($(wc -l < "$MAIN_LEASES_CACHE") - 1)) entries"
         return 0
     fi
 
@@ -1159,8 +1170,9 @@ discover_all() {
         echo "$mac_set" | grep -q " $mac " && continue
         # Skip if already discovered from ARP this run
         grep -q " $mac$" "$arp_tmp" 2>/dev/null && continue
-        # Skip entries with no IP (truly offline)
-        [ -z "$ip" ] || [ "$ip" = "0.0.0.0" ] && continue
+        # Skip entries with no IP (truly offline, cannot register without IP)
+        [ -z "$ip" ] && continue
+        [ "$ip" = "0.0.0.0" ] && continue
         # Valid: add to DHCP-only list
         echo "$ip $mac" >> "$dhcp_tmp"
     done < /tmp/dhcp.leases 2>/dev/null

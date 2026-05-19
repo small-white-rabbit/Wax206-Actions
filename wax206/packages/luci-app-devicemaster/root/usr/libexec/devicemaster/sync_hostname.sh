@@ -57,6 +57,15 @@ if [ -z "$IP" ]; then
     exit 1
 fi
 
+# Concurrent lock (atomic mkdir)
+LOCK="/tmp/dm_sync_hostname.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+    log_msg "ERROR: Another sync in progress, aborting"
+    echo "ERROR: Another sync in progress"
+    exit 1
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
 log_msg "START: $MAC -> $NAME ($IP)"
 
 # Step 1: Remove ALL existing host entries for this MAC
