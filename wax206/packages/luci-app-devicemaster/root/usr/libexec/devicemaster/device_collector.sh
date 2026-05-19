@@ -369,9 +369,16 @@ sync_to_dnsmasq() {
     # Check for duplicate hostnames and add suffix if needed
     local base_name="$safe_name"
     local counter=1
+    # Normalize MAC to lowercase for case-insensitive comparison
+    local mac_lower=$(echo "$mac" | tr 'A-F' 'a-f')
     while true; do
-        # Check if this name is already used by another MAC
-        local dup_entry=$(uci show dhcp 2>/dev/null | grep "\.name='${safe_name}'" | grep -v "${mac}" | head -1)
+        # Check if this name is already used by another MAC (case-insensitive)
+        local dup_entry=$(uci show dhcp 2>/dev/null | grep "\.name='${safe_name}'" | while read line; do
+            idx=$(echo "$line" | grep -o '@host\[[0-9]*\]' | grep -o '[0-9]*')
+            entry_mac=$(uci -q get "dhcp.@host[$idx].mac" 2>/dev/null)
+            entry_mac_lower=$(echo "$entry_mac" | tr 'A-F' 'a-f')
+            [ "$entry_mac_lower" != "$mac_lower" ] && echo "$line" && break
+        done)
         if [ -z "$dup_entry" ]; then
             break
         fi
@@ -382,12 +389,18 @@ sync_to_dnsmasq() {
         [ "$counter" -gt 100 ] && break
     done
 
-    # Find existing entry by MAC (strong binding)
+    # Find existing entry by MAC (strong binding, case-insensitive)
     local existing_section=""
-    local found_entry=$(uci show dhcp 2>/dev/null | grep "\.mac='${mac}'" | head -1)
-    if [ -n "$found_entry" ]; then
-        existing_section=$(echo "$found_entry" | cut -d. -f2 | cut -d= -f1)
-    fi
+    local idx=0
+    while uci -q get "dhcp.@host[$idx].mac" >/dev/null 2>&1; do
+        entry_mac=$(uci -q get "dhcp.@host[$idx].mac")
+        entry_mac_lower=$(echo "$entry_mac" | tr 'A-F' 'a-f')
+        if [ "$entry_mac_lower" = "$mac_lower" ]; then
+            existing_section="@host[$idx]"
+            break
+        fi
+        idx=$((idx + 1))
+    done
 
     if [ -n "$existing_section" ]; then
         # Update existing entry (IP weak binding - update when changed)
