@@ -300,6 +300,33 @@ is_mesh_child_node() {
     return 1
 }
 
+# Check if this device is the mesh main router (has DHCP server enabled)
+# Only main router should modify dhcp config
+is_mesh_main_router() {
+    # Must have dhcp server enabled on lan interface
+    local dhcp_ignore=$(uci -q get dhcp.lan.ignore 2>/dev/null)
+    
+    # dhcp_ignore should be 0 or empty (default is to serve dhcp)
+    if [ "$dhcp_ignore" = "1" ]; then
+        return 1
+    fi
+    
+    # Must have dhcp range configured
+    local dhcp_start=$(uci -q get dhcp.lan.start 2>/dev/null)
+    local dhcp_limit=$(uci -q get dhcp.lan.limit 2>/dev/null)
+    
+    if [ -z "$dhcp_start" ] || [ -z "$dhcp_limit" ]; then
+        return 1
+    fi
+    
+    # Must be able to read /tmp/dhcp.leases (has active dhcp server)
+    if [ ! -f "/tmp/dhcp.leases" ]; then
+        return 1
+    fi
+    
+    return 0
+}
+
 # Sync device name to dnsmasq static lease
 # MAC + hostname = strong binding (hostname follows MAC)
 # MAC + IP = weak binding (IP updates when device gets new IP)
@@ -310,8 +337,10 @@ sync_to_dnsmasq() {
 
     [ -z "$mac" ] || [ -z "$ip" ] || [ -z "$name" ] && return
 
-    # Skip on mesh child nodes
-    is_mesh_child_node && return
+    # ONLY sync on mesh main router - must have dhcp server enabled
+    if ! is_mesh_main_router; then
+        return
+    fi
 
     # Sanitize hostname for dnsmasq: only allow a-z, A-Z, 0-9, -
     # dnsmasq rejects hostnames with other characters (e.g., Chinese)
