@@ -1046,18 +1046,35 @@ function api_unmerge_device()
     
     uci:set("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs", table.concat(new_alts, ","))
     
-    -- Create new device for the unmerged MAC
-    local new_device = uci:add("devicemaster", "device")
-    uci:set("devicemaster", new_device, "mac", alt_mac)
-    uci:set("devicemaster", new_device, "vendor", "LAA")
-    uci:set("devicemaster", new_device, "type", "unknown")
-    uci:set("devicemaster", new_device, "hostname", "*")
-    uci:set("devicemaster", new_device, "first_seen", tostring(os.time()))
-    uci:set("devicemaster", new_device, "last_seen", tostring(os.time()))
+    -- Check if the alt_mac already exists as a separate device
+    local mac_exists = false
+    local check_idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. check_idx .. "]", "mac")
+        if not mac then break end
+        if mac:upper() == alt_mac then
+            mac_exists = true
+            break
+        end
+        check_idx = check_idx + 1
+    end
     
-    uci:commit("devicemaster")
-    
-    json_response({success = true, primary_mac = primary_mac, unmerged_mac = alt_mac})
+    if mac_exists then
+        -- MAC already exists, just remove from alt_macs without creating duplicate
+        uci:commit("devicemaster")
+        json_response({success = true, primary_mac = primary_mac, unmerged_mac = alt_mac, note = "MAC already exists as separate device"})
+    else
+        -- Create new device for the unmerged MAC
+        local new_device = uci:add("devicemaster", "device")
+        uci:set("devicemaster", new_device, "mac", alt_mac)
+        uci:set("devicemaster", new_device, "vendor", "LAA")
+        uci:set("devicemaster", new_device, "type", "unknown")
+        uci:set("devicemaster", new_device, "hostname", "*")
+        uci:set("devicemaster", new_device, "first_seen", tostring(os.time()))
+        uci:set("devicemaster", new_device, "last_seen", tostring(os.time()))
+        uci:commit("devicemaster")
+        json_response({success = true, primary_mac = primary_mac, unmerged_mac = alt_mac})
+    end
 end
 
 -- ============================================================
