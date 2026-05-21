@@ -912,6 +912,7 @@ end
 -- ============================================================
 -- API: Merge multiple devices into one (for rotating MAC addresses)
 -- POST: primary_mac=xx&secondary_macs=yy,zz
+-- Auto-select online MAC as primary
 -- ============================================================
 function api_merge_devices()
     local primary_mac = luci.http.formvalue("primary_mac") or ""
@@ -924,13 +925,49 @@ function api_merge_devices()
         return
     end
     
-    -- Find primary device index
+    -- Collect all MACs (primary + secondary)
+    local all_macs = {primary_mac}
+    for mac in secondary_macs:gmatch("[^,]+") do
+        mac = mac:upper():gsub("-", ":")
+        if mac ~= primary_mac then
+            table.insert(all_macs, mac)
+        end
+    end
+    
+    -- Check which MAC is online (via ARP table)
+    local arp_online = {}
+    local arp_file = io.open("/proc/net/arp", "r")
+    if arp_file then
+        for line in arp_file:lines() do
+            local mac = line:match("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
+            if mac then
+                arp_online[mac:upper()] = true
+            end
+        end
+        arp_file:close()
+    end
+    
+    -- Find the online MAC as primary
+    local online_mac = nil
+    for _, mac in ipairs(all_macs) do
+        if arp_online[mac] then
+            online_mac = mac
+            break
+        end
+    end
+    
+    -- If no online MAC, use the first one
+    if not online_mac then
+        online_mac = all_macs[1]
+    end
+    
+    -- Find primary device (the online one or first one)
     local primary_idx = nil
     local idx = 0
     while true do
         local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
         if not mac then break end
-        if mac:upper() == primary_mac then
+        if mac:upper() == online_mac then
             primary_idx = idx
             break
         end
@@ -949,11 +986,10 @@ function api_merge_devices()
         alt_set[mac:upper()] = true
     end
     
-    -- Add secondary MACs
+    -- Add other MACs as alt_macs
     local new_macs = {}
-    for mac in secondary_macs:gmatch("[^,]+") do
-        mac = mac:upper():gsub("-", ":")
-        if mac ~= primary_mac and not alt_set[mac] then
+    for _, mac in ipairs(all_macs) do
+        if mac ~= online_mac and not alt_set[mac] then
             table.insert(new_macs, mac)
             alt_set[mac] = true
         end
@@ -964,8 +1000,11 @@ function api_merge_devices()
         if new_alt ~= "" then new_alt = new_alt .. "," end
         new_alt = new_alt .. table.concat(new_macs, ",")
         uci:set("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs", new_alt)
-        uci:commit("devicemaster")
     end
+    
+    -- Update last_seen for online device
+    uci:set("devicemaster", "@device[" .. primary_idx .. "]", "last_seen", tostring(os.time()))
+    uci:commit("devicemaster")
     
     -- Remove secondary devices from UCI (they are now merged)
     local to_remove = {}
@@ -990,7 +1029,7 @@ function api_merge_devices()
         uci:commit("devicemaster")
     end
     
-    json_response({success = true, primary_mac = primary_mac, merged_macs = new_macs})
+    json_response({success = true, primary_mac = online_mac, merged_macs = new_macs, note = "Primary MAC selected based on online status"})
 end
 
 -- ============================================================
