@@ -51,6 +51,8 @@ function index()
     entry({"admin", "network", "devicemaster", "api", "scan_network"}, call("api_scan_network"))
     entry({"admin", "network", "devicemaster", "api", "discover"}, call("api_discover"))
     entry({"admin", "network", "devicemaster", "api", "set_mode"}, call("api_set_mode"))
+    entry({"admin", "network", "devicemaster", "api", "merge_devices"}, call("api_merge_devices"))
+    entry({"admin", "network", "devicemaster", "api", "unmerge_device"}, call("api_unmerge_device"))
 
     -- OUI Database management
     entry({"admin", "network", "devicemaster", "download_oui"}, call("action_download_oui"))
@@ -908,6 +910,157 @@ function api_set_mode()
 end
 
 -- ============================================================
+-- API: Merge multiple devices into one (for rotating MAC addresses)
+-- POST: primary_mac=xx&secondary_macs=yy,zz
+-- ============================================================
+function api_merge_devices()
+    local primary_mac = luci.http.formvalue("primary_mac") or ""
+    local secondary_macs = luci.http.formvalue("secondary_macs") or ""
+    
+    primary_mac = primary_mac:upper():gsub("-", ":")
+    
+    if primary_mac == "" or secondary_macs == "" then
+        json_response({success = false, error = "Missing parameters"})
+        return
+    end
+    
+    -- Find primary device index
+    local primary_idx = nil
+    local idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
+        if not mac then break end
+        if mac:upper() == primary_mac then
+            primary_idx = idx
+            break
+        end
+        idx = idx + 1
+    end
+    
+    if not primary_idx then
+        json_response({success = false, error = "Primary device not found"})
+        return
+    end
+    
+    -- Get current alt_macs
+    local current_alt = uci:get("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs") or ""
+    local alt_set = {}
+    for mac in current_alt:gmatch("[^,]+") do
+        alt_set[mac:upper()] = true
+    end
+    
+    -- Add secondary MACs
+    local new_macs = {}
+    for mac in secondary_macs:gmatch("[^,]+") do
+        mac = mac:upper():gsub("-", ":")
+        if mac ~= primary_mac and not alt_set[mac] then
+            table.insert(new_macs, mac)
+            alt_set[mac] = true
+        end
+    end
+    
+    if #new_macs > 0 then
+        local new_alt = current_alt
+        if new_alt ~= "" then new_alt = new_alt .. "," end
+        new_alt = new_alt .. table.concat(new_macs, ",")
+        uci:set("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs", new_alt)
+        uci:commit("devicemaster")
+    end
+    
+    -- Remove secondary devices from UCI (they are now merged)
+    local to_remove = {}
+    idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
+        if not mac then break end
+        for _, sec_mac in ipairs(new_macs) do
+            if mac:upper() == sec_mac then
+                table.insert(to_remove, idx)
+                break
+            end
+        end
+        idx = idx + 1
+    end
+    
+    -- Remove from highest index to lowest to avoid shifting issues
+    for i = #to_remove, 1, -1 do
+        uci:delete("devicemaster", "@device[" .. to_remove[i] .. "]")
+    end
+    if #to_remove > 0 then
+        uci:commit("devicemaster")
+    end
+    
+    json_response({success = true, primary_mac = primary_mac, merged_macs = new_macs})
+end
+
+-- ============================================================
+-- API: Unmerge a device (restore secondary MAC as separate device)
+-- POST: primary_mac=xx&alt_mac=yy
+-- ============================================================
+function api_unmerge_device()
+    local primary_mac = luci.http.formvalue("primary_mac") or ""
+    local alt_mac = luci.http.formvalue("alt_mac") or ""
+    
+    primary_mac = primary_mac:upper():gsub("-", ":")
+    alt_mac = alt_mac:upper():gsub("-", ":")
+    
+    if primary_mac == "" or alt_mac == "" then
+        json_response({success = false, error = "Missing parameters"})
+        return
+    end
+    
+    -- Find primary device
+    local primary_idx = nil
+    local idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
+        if not mac then break end
+        if mac:upper() == primary_mac then
+            primary_idx = idx
+            break
+        end
+        idx = idx + 1
+    end
+    
+    if not primary_idx then
+        json_response({success = false, error = "Primary device not found"})
+        return
+    end
+    
+    -- Get and update alt_macs
+    local alt_macs = uci:get("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs") or ""
+    local new_alts = {}
+    local found = false
+    for mac in alt_macs:gmatch("[^,]+") do
+        if mac:upper() ~= alt_mac then
+            table.insert(new_alts, mac)
+        else
+            found = true
+        end
+    end
+    
+    if not found then
+        json_response({success = false, error = "Alt MAC not found in primary device"})
+        return
+    end
+    
+    uci:set("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs", table.concat(new_alts, ","))
+    
+    -- Create new device for the unmerged MAC
+    local new_device = uci:add("devicemaster", "device")
+    uci:set("devicemaster", new_device, "mac", alt_mac)
+    uci:set("devicemaster", new_device, "vendor", "LAA")
+    uci:set("devicemaster", new_device, "type", "unknown")
+    uci:set("devicemaster", new_device, "hostname", "*")
+    uci:set("devicemaster", new_device, "first_seen", tostring(os.time()))
+    uci:set("devicemaster", new_device, "last_seen", tostring(os.time()))
+    
+    uci:commit("devicemaster")
+    
+    json_response({success = true, primary_mac = primary_mac, unmerged_mac = alt_mac})
+end
+
+-- ============================================================
 -- Core API: Real-time device status
 -- Reads UCI profiles + ARP online status, joins in memory
 -- Uses response cache to reduce load on hostapd/netifd
@@ -1260,6 +1413,13 @@ function api_status()
         end
 
         local rp = remote_devices[mac_upper]
+        -- Parse alt_macs string into array
+        local alt_macs = {}
+        if s.alt_macs and s.alt_macs ~= "" then
+            for alt_mac in s.alt_macs:gmatch("[^,]+") do
+                table.insert(alt_macs, alt_mac:upper())
+            end
+        end
         devices[#devices + 1] = {
             mac = s.mac,
             ip = ip,
@@ -1279,7 +1439,8 @@ function api_status()
             blocked = (s.blocked == "1"),
             rate_limit = s.rate_limit or nil,
             group = s.group or s.groups or nil,
-            notes = s.notes or nil
+            notes = s.notes or nil,
+            alt_macs = alt_macs  -- Array of alternative MAC addresses (for rotating MAC devices)
         }
     end)
 
