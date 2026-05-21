@@ -235,9 +235,12 @@ function buildCardHTML(d) {
     if (d.rate_limit) {
         detailsHtml += '<div style="color:#e65100;font-weight:bold;">限速: ' + escapeHtml(d.rate_limit) + '</div>';
     }
-    // 显示备用MAC
+    // 显示备用MAC（轮动式展示，节省空间）
     if (d.alt_macs && d.alt_macs.length > 0) {
-        detailsHtml += '<div class="device-alt-macs">备用MAC: ' + d.alt_macs.join(', ') + '</div>';
+        var altCount = d.alt_macs.length;
+        var altText = d.alt_macs[0];
+        if (altCount > 1) altText += ' (+' + (altCount - 1) + ')';
+        detailsHtml += '<div class="device-alt-macs" title="' + d.alt_macs.join(', ') + '">备用: ' + altText + '</div>';
     }
     h += '<div class="device-details">' + detailsHtml + '</div>';
     h += '<div class="device-actions">';
@@ -251,10 +254,6 @@ function buildCardHTML(d) {
             h += '<button class="btn cbi-button cbi-button-negative" onclick="event.stopPropagation(); blockDevice(\'' + d.mac + '\')">封禁</button>';
         }
         h += '<button class="btn cbi-button" onclick="event.stopPropagation(); limitDevice(\'' + d.mac + '\')">限速</button>';
-    }
-    // 如果有备用MAC，显示拆分按钮
-    if (d.alt_macs && d.alt_macs.length > 0) {
-        h += '<button class="btn cbi-button" onclick="event.stopPropagation(); unmergeDevice(\'' + d.mac + '\')">拆分</button>';
     }
     h += '</div></div>';
     return h;
@@ -425,37 +424,6 @@ window.limitDevice = function(mac) {
             rate = rate.replace(/^(\d+)k$/, '$1kbit');
         }
         httpPost(apiUrl + '/limit', 'mac=' + encodeURIComponent(mac) + '&rate=' + encodeURIComponent(rate), loadDevices);
-    }
-};
-
-// Unmerge device - split alt_mac into separate device
-window.unmergeDevice = function(mac) {
-    var device = deviceMap[mac];
-    if (!device || !device.alt_macs || device.alt_macs.length === 0) {
-        alert('该设备没有可拆分的备用MAC');
-        return;
-    }
-    // Show dialog to select which alt_mac to unmerge
-    var options = device.alt_macs.map(function(alt, idx) {
-        return (idx + 1) + '. ' + alt;
-    }).join('\n');
-    var choice = prompt('选择要拆分的备用MAC:\n' + options + '\n\n输入序号 (1-' + device.alt_macs.length + '):');
-    if (choice === null) return;
-    var idx = parseInt(choice) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= device.alt_macs.length) {
-        alert('无效的选择');
-        return;
-    }
-    var altMac = device.alt_macs[idx];
-    if (confirm('确定要将 ' + altMac + ' 从该设备拆分出来吗？')) {
-        httpPost(apiUrl + '/unmerge_device', 'primary_mac=' + encodeURIComponent(mac) + '&alt_mac=' + encodeURIComponent(altMac), function(res) {
-            if (res && res.success) {
-                alert('设备拆分成功！');
-                loadDevices();
-            } else {
-                alert('拆分失败: ' + (res && res.error || '未知错误'));
-            }
-        });
     }
 };
 
