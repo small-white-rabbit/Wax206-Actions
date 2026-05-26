@@ -90,7 +90,12 @@ jobs:
 
       - name: 获取内核版本
         run: |
-          echo "KVER=$(find ./${{ inputs.model || 'wax206' }}/dl -maxdepth 1 -name "linux-[4-6]\.*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")" >> $GITHUB_ENV
+          if [ -f "./firmware/kernel_version" ]; then
+            echo "KVER=$(cat ./firmware/kernel_version)" >> $GITHUB_ENV
+          else
+            echo "KVER=Unknown" >> $GITHUB_ENV
+            echo "::warning::未找到内核版本文件"
+          fi
           cd ${{ inputs.model || 'wax206' }}
           useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
           echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV

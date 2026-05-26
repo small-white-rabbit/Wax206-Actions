@@ -626,6 +626,11 @@ FIRMWARE_DIR="$BASE_PATH/../firmware"
 mkdir -p "$FIRMWARE_DIR"
 find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
 
+# 输出内核版本供workflow使用
+KVER=$(find "$BUILD_DIR/dl" -maxdepth 1 -name "linux-[4-6]*" -type d | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]+\.[0-9]+" | head -1)
+echo "$KVER" > "$FIRMWARE_DIR/kernel_version"
+echo "内核版本: $KVER"
+
 # if [[ -d "action_build" ]]; then make clean; fi
 
 echo "=========================================="
