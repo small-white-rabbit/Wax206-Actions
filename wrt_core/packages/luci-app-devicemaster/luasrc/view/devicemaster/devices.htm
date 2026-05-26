@@ -41,11 +41,19 @@ Copyright (C) 2024 OpenWrt-DeviceMaster Project
 .stat-value{display:block;font-size:24px;font-weight:bold;color:#333}
 .stat-label{font-size:12px;color:#666}
 .devicemaster-devices{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;padding-left:20px}
-.device-card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:15px}
+.device-card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:15px;cursor:pointer;position:relative}
 .device-card.offline{opacity:0.6}
 .device-card.blocked{border-color:#dc3545;background:#fff5f5}
 .device-card.limited{border-color:#ffc107;background:#fffbf0}
 .device-card.upstream{background:#f0f4f8;border-color:#c5d0db;border-style:dashed}
+.device-card.selected{border-color:#007bff;background:#e3f2fd;box-shadow:0 0 0 2px #007bff}
+.device-card.has-alt-macs{border-left:4px solid #28a745}
+.device-alt-macs{font-size:10px;color:#28a745;margin-top:4px}
+.merge-hint{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#007bff;color:#fff;padding:12px 24px;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.3);z-index:1000;display:none;gap:10px;align-items:center}
+.merge-hint.show{display:flex}
+.merge-hint .btn{background:#fff;color:#007bff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer}
+.merge-hint .btn:hover{background:#f0f0f0}
+.merge-hint .cancel{color:#fff;text-decoration:underline;cursor:pointer;margin-left:10px}
 .device-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px}
 .device-info{flex:1;min-width:0}
 .device-name{font-weight:bold;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -66,17 +74,6 @@ Copyright (C) 2024 OpenWrt-DeviceMaster Project
 .device-status.blocked{background:#dc3545;box-shadow:0 0 4px #dc3545}
 .device-status.limited{background:#ffc107;box-shadow:0 0 4px #ffc107}
 .loading{text-align:center;padding:40px;color:#666}
-/* Bandix: connection type badges */
-.conn-badge{display:inline-block;padding:0 5px;border-radius:3px;font-size:9px;font-weight:bold;vertical-align:middle;margin-left:4px}
-.conn-wifi{background:#e3f2fd;color:#1565c0}
-.conn-wired{background:#e8f5e9;color:#2e7d32}
-.conn-router{background:#f3e5f5;color:#7b1fa2}
-/* Bandix: speed and traffic info */
-.speed-info{font-size:11px;color:#333;margin-top:2px}
-.speed-down{color:#2e7d32}
-.speed-up{color:#e65100}
-.traffic-info{font-size:10px;color:#888;margin-top:1px}
-.conn-info{font-size:10px;color:#666;margin-top:1px}
 @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 
 /* 移动端响应式布局 */
@@ -111,10 +108,73 @@ Copyright (C) 2024 OpenWrt-DeviceMaster Project
 (function(){
 var devices=[];
 var deviceMap={};
-var hasBandix=false;
 var apiUrl = '<%=luci.dispatcher.build_url("admin/network/devicemaster/api")%>';
 var typeLabels = {'phone':'手机','pc':'电脑','iot':'IoT','network':'网络','unknown':'未知'};
+var selectedDevices = [];  // 存储选中的设备MAC
 
+// 创建设备合并提示框
+var mergeHint = document.createElement('div');
+mergeHint.className = 'merge-hint';
+mergeHint.innerHTML = '<span id="merge-text">已选择 0 个设备</span><button class="btn" id="merge-btn">合并设备</button><span class="cancel" id="merge-cancel">取消</span>';
+document.body.appendChild(mergeHint);
+
+// 合并按钮点击事件
+document.getElementById('merge-btn').addEventListener('click', function() {
+    if (selectedDevices.length < 2) return;
+    var primaryMac = selectedDevices[0];
+    var secondaryMacs = selectedDevices.slice(1).join(',');
+    if (confirm('确定要将这 ' + selectedDevices.length + ' 个设备合并吗？\n\n主设备: ' + primaryMac + '\n备用MAC: ' + secondaryMacs)) {
+        httpPost(apiUrl + '/merge_devices', 'primary_mac=' + encodeURIComponent(primaryMac) + '&secondary_macs=' + encodeURIComponent(secondaryMacs), function(res) {
+            if (res && res.success) {
+                alert('设备合并成功！');
+                clearSelection();
+                loadDevices();
+            } else {
+                alert('合并失败: ' + (res && res.error || '未知错误'));
+            }
+        });
+    }
+});
+
+// 取消按钮点击事件
+document.getElementById('merge-cancel').addEventListener('click', clearSelection);
+
+function clearSelection() {
+    selectedDevices = [];
+    document.querySelectorAll('.device-card.selected').forEach(function(card) {
+        card.classList.remove('selected');
+    });
+    mergeHint.classList.remove('show');
+}
+
+function updateSelection(mac, card) {
+    var idx = selectedDevices.indexOf(mac);
+    if (idx >= 0) {
+        // 取消选择
+        selectedDevices.splice(idx, 1);
+        card.classList.remove('selected');
+    } else {
+        // 添加选择
+        if (selectedDevices.length >= 2) {
+            // 最多选择2个，替换最后一个
+            var oldMac = selectedDevices.pop();
+            document.getElementById('card-' + oldMac.replace(/:/g, '')).classList.remove('selected');
+        }
+        selectedDevices.push(mac);
+        card.classList.add('selected');
+    }
+    
+    // 更新提示框
+    if (selectedDevices.length >= 2) {
+        document.getElementById('merge-text').textContent = '已选择 ' + selectedDevices.length + ' 个设备，是否合并？';
+        mergeHint.classList.add('show');
+    } else if (selectedDevices.length === 1) {
+        document.getElementById('merge-text').textContent = '已选择 1 个设备，请再选择一个';
+        mergeHint.classList.add('show');
+    } else {
+        mergeHint.classList.remove('show');
+    }
+}
 
 function httpGet(url, callback) {
     var xhr = new XMLHttpRequest();
@@ -136,7 +196,13 @@ function httpPost(url, data, callback) {
     var xhr = new XMLHttpRequest();
     xhr.open('POST', url, true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-    xhr.onreadystatechange = function() { if (xhr.readyState === 4 && callback) callback(); };
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === 4 && callback) {
+            var res = null;
+            try { res = JSON.parse(xhr.responseText); } catch(e) {}
+            callback(res);
+        }
+    };
     xhr.send(data);
 }
 
@@ -144,20 +210,6 @@ function escapeHtml(text) {
     var div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
-}
-
-function formatBytes(b) {
-    if (!b || b === 0) return '0 B';
-    var units = ['B','KB','MB','GB','TB'];
-    var i = Math.floor(Math.log(b) / Math.log(1024));
-    return parseFloat((b / Math.pow(1024, i)).toFixed(1)) + ' ' + units[i];
-}
-
-function formatSpeed(bps) {
-    if (!bps || bps === 0) return '';
-    var units = ['B/s','KB/s','MB/s','GB/s'];
-    var i = Math.floor(Math.log(bps) / Math.log(1024));
-    return parseFloat((bps / Math.pow(1024, i)).toFixed(1)) + ' ' + units[i];
 }
 
 function getStatusClass(d) {
@@ -171,47 +223,37 @@ function buildCardHTML(d) {
     var cls = getStatusClass(d);
     var upstream = d.is_controllable === false;
     if (upstream) cls += ' upstream';
+    if (d.alt_macs && d.alt_macs.length > 0) cls += ' has-alt-macs';
     var typeLabel = typeLabels[d.type] || typeLabels['unknown'];
-    var h = '<div class="device-card ' + cls + '" id="card-' + d.mac.replace(/:/g,'') + '">';
+    var h = '<div class="device-card ' + cls + '" id="card-' + d.mac.replace(/:/g,'') + '" data-mac="' + d.mac + '">';
     h += '<div class="device-header"><div class="device-info">';
     h += '<div class="device-name">' + escapeHtml(name) + '</div>';
-    h += '<div class="device-vendor">' + escapeHtml(d.vendor || '未知') + ' <span class="device-type ' + (d.type || 'unknown') + '">' + typeLabel + '</span>';
-    // Connection type badge (Bandix)
-    if (hasBandix && (d.uplink || d.conn_type)) {
-        var connLabel = d.uplink || d.conn_type;
-        h += ' <span class="conn-badge conn-' + (d.conn_type || '') + '">' + connLabel + '</span>';
-    }
-    h += '</div></div><span class="device-status ' + getStatusClass(d) + '" id="status-' + d.mac.replace(/:/g,'') + '"></span></div>';
+    var meshBadge = (d.topology === 'mesh_node' && d.mesh_connected) ? ' <span class="device-type mesh" style="background:#4caf50;color:#fff;">mesh</span>' : '';
+    h += '<div class="device-vendor">' + escapeHtml(d.vendor || '未知') + ' <span class="device-type ' + (d.type || 'unknown') + '">' + typeLabel + '</span>' + meshBadge + '</div>';
+    h += '</div><span class="device-status ' + getStatusClass(d) + '" id="status-' + d.mac.replace(/:/g,'') + '"></span></div>';
     var detailsHtml = '<div>MAC: ' + d.mac + '</div><div>IP: ' + (d.ip || 'N/A') + '</div>';
-    // Real-time speed (Bandix) - always show when bandix data exists
-    if (hasBandix && (d.rx_rate !== undefined)) {
-        var rxS = formatSpeed(d.rx_rate);
-        var txS = formatSpeed(d.tx_rate);
-        detailsHtml += '<div class="speed-info"><span class="speed-down">↓' + rxS + '</span> <span class="speed-up">↑' + txS + '</span></div>';
-    }
-    // Total traffic (Bandix) - always show when bandix data exists
-    if (hasBandix && (d.rx_bytes !== undefined)) {
-        detailsHtml += '<div class="traffic-info">↓' + formatBytes(d.rx_bytes) + ' ↑' + formatBytes(d.tx_bytes) + '</div>';
-    }
     if (d.rate_limit) {
         detailsHtml += '<div style="color:#e65100;font-weight:bold;">限速: ' + escapeHtml(d.rate_limit) + '</div>';
     }
-    // Connection count (Bandix)
-    if (hasBandix && d.connections && d.connections.total > 0) {
-        detailsHtml += '<div class="conn-info">连接: ' + d.connections.total + ' (TCP:' + d.connections.tcp_est + ')</div>';
+    // 显示备用MAC（轮动式展示，节省空间）
+    if (d.alt_macs && d.alt_macs.length > 0) {
+        var altCount = d.alt_macs.length;
+        var altText = d.alt_macs[0];
+        if (altCount > 1) altText += ' (+' + (altCount - 1) + ')';
+        detailsHtml += '<div class="device-alt-macs" title="' + d.alt_macs.join(', ') + '">备用: ' + altText + '</div>';
     }
     h += '<div class="device-details">' + detailsHtml + '</div>';
     h += '<div class="device-actions">';
-    h += '<button class="btn cbi-button" onclick="editDevice(\'' + d.mac + '\')">编辑</button>';
+    h += '<button class="btn cbi-button" onclick="event.stopPropagation(); editDevice(\'' + d.mac + '\')">编辑</button>';
     if (upstream) {
         h += '<span class="device-hint" style="color:#888;font-size:11px;">上游设备不可控</span>';
     } else {
         if (d.blocked) {
-            h += '<button class="btn cbi-button cbi-button-positive" onclick="unblockDevice(\'' + d.mac + '\')">解除限制</button>';
+            h += '<button class="btn cbi-button cbi-button-positive" onclick="event.stopPropagation(); unblockDevice(\'' + d.mac + '\')">解除限制</button>';
         } else {
-            h += '<button class="btn cbi-button cbi-button-negative" onclick="blockDevice(\'' + d.mac + '\')">封禁</button>';
+            h += '<button class="btn cbi-button cbi-button-negative" onclick="event.stopPropagation(); blockDevice(\'' + d.mac + '\')">封禁</button>';
         }
-        h += '<button class="btn cbi-button" onclick="limitDevice(\'' + d.mac + '\')">限速</button>';
+        h += '<button class="btn cbi-button" onclick="event.stopPropagation(); limitDevice(\'' + d.mac + '\')">限速</button>';
     }
     h += '</div></div>';
     return h;
@@ -230,13 +272,21 @@ function renderDevices() {
     for (var i = 0; i < filtered.length; i++) html += buildCardHTML(filtered[i]);
     listEl.innerHTML = html;
     
-    // Add double-click event listeners for delete
+    // Add click event for selection and double-click for delete
     var cards = listEl.querySelectorAll('.device-card');
     for (var i = 0; i < cards.length; i++) {
+        // Click to select for merge
+        cards[i].addEventListener('click', function(e) {
+            // Prevent click on buttons
+            if (e.target.tagName === 'BUTTON') return;
+            var mac = this.getAttribute('data-mac');
+            updateSelection(mac, this);
+        });
+        // Double-click to delete
         cards[i].addEventListener('dblclick', function(e) {
             // Prevent double-click on buttons
             if (e.target.tagName === 'BUTTON') return;
-            var mac = this.id.replace('card-', '').replace(/(.{2})(?=.)/g, '$1:');
+            var mac = this.getAttribute('data-mac');
             confirmDeleteDevice(mac);
         });
     }
@@ -274,21 +324,6 @@ function silentRefresh() {
             if (old.ip !== nw.ip) {
                 var detailDivs = card.querySelectorAll('.device-details div');
                 if (detailDivs[1]) detailDivs[1].textContent = 'IP: ' + (nw.ip || 'N/A');
-            }
-            // Update Bandix speed/traffic in-place (always update, never clear)
-            if (hasBandix) {
-                var speedEl = card.querySelector('.speed-info');
-                if (speedEl) {
-                    speedEl.innerHTML = '<span class="speed-down">↓' + formatSpeed(nw.rx_rate || 0) + '</span> <span class="speed-up">↑' + formatSpeed(nw.tx_rate || 0) + '</span>';
-                }
-                var trafficEl = card.querySelector('.traffic-info');
-                if (trafficEl) {
-                    trafficEl.textContent = '↓' + formatBytes(nw.rx_bytes || 0) + ' ↑' + formatBytes(nw.tx_bytes || 0);
-                }
-                var connEl = card.querySelector('.conn-info');
-                if (connEl && nw.connections) {
-                    connEl.textContent = '连接: ' + nw.connections.total + ' (TCP:' + nw.connections.tcp_est + ')';
-                }
             }
         }
 
@@ -328,7 +363,6 @@ function loadDevices(){
     listEl.innerHTML = '<div class="loading">加载中...</div>';
     httpGet(apiUrl + '/status', function(res) {
         if (res && res.devices) {
-            hasBandix = !!res.bandix;
             devices = res.devices;
             deviceMap = {};
             for (var i = 0; i < devices.length; i++) deviceMap[devices[i].mac] = devices[i];
@@ -428,14 +462,29 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     startRefresh();
 
-    // Tab visibility: pause refresh when hidden, resume when visible
+    // Dual-mode: notify backend when page opens/closes
+    function setBackendMode(mode) {
+        httpPost(apiUrl + '/set_mode', 'mode=' + mode, function(){});
+    }
+    
+    // Set active mode on page load
+    setBackendMode('active');
+    
+    // Tab visibility: pause refresh and set idle mode when hidden
     document.addEventListener('visibilitychange', function() {
         if (document.hidden) {
             stopRefresh();
+            setBackendMode('idle');
         } else {
+            setBackendMode('active');
             silentRefresh();
             startRefresh();
         }
+    });
+    
+    // Set idle mode when page unloads (close/refresh/navigate away)
+    window.addEventListener('beforeunload', function() {
+        setBackendMode('idle');
     });
 });
 })();

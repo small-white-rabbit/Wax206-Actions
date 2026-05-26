@@ -43,8 +43,16 @@ function index()
     entry({"admin", "network", "devicemaster", "api", "get_groups"}, call("api_get_groups"))
     entry({"admin", "network", "devicemaster", "api", "create_group"}, call("api_create_group"))
     entry({"admin", "network", "devicemaster", "api", "delete_group"}, call("api_delete_group"))
+    entry({"admin", "network", "devicemaster", "api", "snapshot"}, call("api_snapshot"))
+    entry({"admin", "network", "devicemaster", "api", "report"}, call("api_report"))
+    local report_sub_node = entry({"admin", "network", "devicemaster", "api", "report_sub"}, call("api_report_sub"))
+    report_sub_node.sysauth = false
+    report_sub_node.leaf = true
     entry({"admin", "network", "devicemaster", "api", "scan_network"}, call("api_scan_network"))
     entry({"admin", "network", "devicemaster", "api", "discover"}, call("api_discover"))
+    entry({"admin", "network", "devicemaster", "api", "set_mode"}, call("api_set_mode"))
+    entry({"admin", "network", "devicemaster", "api", "merge_devices"}, call("api_merge_devices"))
+    entry({"admin", "network", "devicemaster", "api", "unmerge_device"}, call("api_unmerge_device"))
 
     -- OUI Database management
     entry({"admin", "network", "devicemaster", "download_oui"}, call("action_download_oui"))
@@ -64,21 +72,570 @@ local function exec_safe(cmd)
     return result:gsub("\n$", "")
 end
 
--- Helper: Get device online status and IPs
--- Uses three data sources:
---   1. /proc/net/arp - all known devices (for IP addresses)
---   2. ip neigh REACHABLE/PERMANENT - truly online devices
---   3. Active ping probe for STALE devices (fast detection when page is open)
--- Returns: online_macs { ["MAC"] = "IP" }, all_macs { ["MAC"] = "IP" }
+-- Helper: Get MAC address of wl1-mesh0 virtual interface
+local function get_mesh_vmac()
+    local mif = sys.exec("ip link show dev wl1-mesh0 2>/dev/null | grep 'link/ether' | awk '{print $2}'")
+    if mif and mif ~= "" then
+        return mif:upper():match("^([0-9A-Fa-f:]+)")
+    end
+    return nil
+end
+
+-- Helper: Get all local interface MACs + bridge local FDB entries
+-- These are the router's own MACs and should not appear in device list
+local function get_local_macs()
+    local macs = {}
+    -- Interface MACs from ip link
+    local out = sys.exec("ip link show 2>/dev/null | grep 'link/ether' | awk '{print $2}'")
+    if out and out ~= "" then
+        for mac in out:gmatch("([0-9A-Fa-f:]+)") do
+            macs[mac:upper()] = true
+        end
+    end
+    -- Bridge local FDB entries (catches hardware virtual MACs)
+    local fdb = sys.exec("brctl showmacs br-lan 2>/dev/null")
+    if fdb and fdb ~= "" then
+        for line in fdb:gmatch("[^\r\n]+") do
+            local mac = line:match("^%s*%d+%s+([0-9a-fA-F:]+)%s+yes")
+            if mac then macs[mac:upper()] = true end
+        end
+    end
+    return macs
+end
+
+-- Helper: Dynamically discover wireless AP interfaces
+local function get_ap_ifaces()
+    local ifaces = {}
+    local out = sys.exec("ls /sys/class/net/ 2>/dev/null | grep '^wl'")
+    if out and out ~= "" then
+        for iface in out:gmatch("%S+") do
+            if not iface:match("mesh") then
+                table.insert(ifaces, iface)
+            end
+        end
+    end
+    if #ifaces == 0 then
+        return {"wl0-ap0", "wl1-ap0", "wl0-ap1", "wl1-ap1"}
+    end
+    return ifaces
+end
+
+-- Helper: Generate version string for response cache
+local function get_version()
+    return "v" .. os.date("%Y%m%d%H%M")
+end
+
+-- Helper: Get WiFi station list (devices directly connected to this router)
+-- Returns: { ["MAC"] = true }
+local function get_wifi_stations()
+    local stations = {}
+    for _, iface in ipairs(get_ap_ifaces()) do
+        local output = sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null")
+        if output then
+            for word in output:gmatch("%S+") do
+                if #word == 17 and word:match("^[0-9A-Fa-f:]+$") then
+                    stations[word:upper()] = true
+                end
+            end
+        end
+    end
+    return stations
+end
+
+-- Helper: Get DHCP leases as { mac = { ip, hostname } }
+local function get_dhcp_leases()
+    local leases = {}
+    local f = io.open("/tmp/dhcp.leases", "r")
+    if not f then return leases end
+    for line in f:lines() do
+        local ts, mac, ip, hostname = line:match("^(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+        if mac and ip then
+            leases[mac:upper()] = { ip = ip, hostname = hostname }
+        end
+    end
+    f:close()
+    return leases
+end
+
+-- Helper: Get uplink info from Bandix API
+-- Returns: { ["MAC"] = "uplink" } where uplink is "wl1-ap0", "wl1-mesh0", etc.
+local function get_bandix_uplink()
+    local uplinks = {}
+    
+    -- Check if bandix is running
+    local result = sys.exec("pidof bandix 2>/dev/null")
+    if not result or result:gsub("\n", "") == "" then
+        return uplinks
+    end
+    
+    -- Get port from UCI
+    local port = uci:get("bandix", "general", "port") or "8686"
+    
+    -- Fetch device list from Bandix API
+    local response = sys.exec("curl -s --connect-timeout 1 --max-time 3 'http://127.0.0.1:" .. port .. "/api/traffic/devices' 2>/dev/null")
+    if not response or response == "" or not response:find('"status":"success"') then
+        return uplinks
+    end
+    
+    -- Parse JSON in Lua (avoid spawning per-device shell subprocesses)
+    local ok, data = pcall(json.parse, response)
+    if not ok or type(data) ~= "table" or type(data.data) ~= "table" then
+        return uplinks
+    end
+    local devices = data.data.d
+    if type(devices) ~= "table" then
+        return uplinks
+    end
+    
+    for _, dev in ipairs(devices) do
+        local mac = dev.mac
+        if mac and mac ~= "" then
+            uplinks[mac:upper()] = dev.uplink or ""
+        end
+    end
+    
+    return uplinks
+end
+
+-- Helper: Get mesh station list (mesh nodes connected via wl1-mesh0)
+-- Returns: { ["MAC"] = true }
+local function get_mesh_stations()
+    local stations = {}
+    local output = sys.exec("iw dev wl1-mesh0 station dump 2>/dev/null")
+    if output then
+        for line in output:gmatch("[^\r\n]+") do
+            local mac = line:match("^Station ([0-9A-Fa-f:]+)")
+            if mac then
+                stations[mac:upper()] = true
+            end
+        end
+    end
+    return stations
+end
+
+-- ============================================================
+-- Role detection: determine if this device is master/sub/client
+-- ============================================================
+-- Returns: { role = "master"|"sub"|"client", master_ip, subnet, iface }
+local function detect_role()
+    local role = "client"
+    local master_ip = ""
+    local subnet = ""
+    local iface = "br-lan"
+    
+    -- Check if mesh interface exists
+    local mesh = sys.exec("iw dev wl1-mesh0 info 2>/dev/null")
+    if not mesh or mesh == "" then
+        return { role = role, master_ip = master_ip, subnet = subnet, iface = iface }
+    end
+    
+    -- Has mesh interface: determine master vs sub by DHCP service presence
+    -- Note: pidof dnsmasq is unreliable because sub-nodes also run dnsmasq for DNS
+    -- Use dhcp.lan.ignore to distinguish: ignore=1 means DHCP disabled → sub
+    -- Use gsub to strip trailing newline from sys.exec output
+    local dhcp_ignore = sys.exec("uci -q get dhcp.lan.ignore 2>/dev/null"):gsub("%s+$", "")
+    if dhcp_ignore ~= "1" then
+        role = "master"
+    else
+        role = "sub"
+        -- Infer master IP from default gateway
+        -- sys.exec output includes trailing newline, must strip before match
+        local gw = sys.exec("ip route show default 2>/dev/null | awk '{print $3}' | head -1"):gsub("%s+$", "")
+        if gw and gw:match("^%d+%.%d+%.%d+%.%d+$") then
+            master_ip = gw
+        end
+    end
+    
+    -- Infer subnet
+    local rt = sys.exec("ip route show dev " .. iface .. " 2>/dev/null | awk '{print $1}' | head -1")
+    if rt then subnet = rt end
+    
+    return { role = role, master_ip = master_ip, subnet = subnet, iface = iface }
+end
+
+-- ============================================================
+-- Create full device snapshot (for sub-node consumption)
+-- Written to /tmp/dm_snapshot.json, refreshed every 60s
+-- ============================================================
+local function create_snapshot()
+    local role_info = detect_role()
+    
+    -- Only master creates snapshot
+    local snap = {
+        _ts = os.time(),
+        role = role_info.role,
+        dhcp_leases = {},
+        arp = {},
+        wifi_stations = {},
+        fdb_macs = {},
+        child_reports = {}  -- reported by sub-nodes via POST /api/report
+    }
+    
+    -- DHCP leases
+    local f = io.open("/tmp/dhcp.leases", "r")
+    if f then
+        for line in f:lines() do
+            local ts, mac, ip, hostname = line:match("^(%d+)%s+(%S+)%s+(%S+)%s+(%S+)")
+            if mac and ip then snap.dhcp_leases[mac:upper()] = { ip = ip, hostname = hostname or "" } end
+        end
+        f:close()
+    end
+    
+    -- ARP table
+    f = io.open("/proc/net/arp", "r")
+    if f then
+        f:read("*l")
+        for line in f:lines() do
+            local ip, hw_type, flags, mac = line:match("^(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(%S+)")
+            if mac and mac ~= "00:00:00:00:00:00" and flags ~= "0x0" then
+                snap.arp[mac:upper()] = ip
+            end
+        end
+        f:close()
+    end
+    
+    -- WiFi stations
+    for _, iface in ipairs(get_ap_ifaces()) do
+        local out = sys.exec("iwinfo " .. iface .. " assoclist 2>/dev/null")
+        if out then
+            for word in out:gmatch("%S+") do
+                if #word == 17 and word:match("^[0-9A-Fa-f:]+$") then
+                    snap.wifi_stations[word:upper()] = { iface = iface }
+                end
+            end
+        end
+    end
+    
+    -- Bridge FDB non-local MACs
+    local mesh_vmac = get_mesh_vmac()
+    local fdb = sys.exec("brctl showmacs br-lan 2>/dev/null")
+    if fdb and fdb ~= "" then
+        local mesh_port = nil
+        for line in fdb:gmatch("[^\r\n]+") do
+            local port, mac, is_local = line:match("^%s*(%d+)%s+([0-9a-fA-F:]+)%s+(%S+)")
+            if port and mac and is_local == "yes" and mesh_vmac and mac:upper() == mesh_vmac then
+                mesh_port = port; break
+            end
+        end
+        if mesh_port then
+            for line in fdb:gmatch("[^\r\n]+") do
+                local port, mac, is_local = line:match("^%s*(%d+)%s+([0-9a-fA-F:]+)%s+(%S+)")
+                if port and port == mesh_port and mac and is_local == "no" then
+                    snap.fdb_macs[mac:upper()] = true
+                end
+            end
+        end
+    end
+    
+    -- Merge child_reports from file
+    local cf = io.open("/tmp/dm_child_reports.json", "r")
+    if cf then
+        local ok, cr = pcall(json.parse, cf:read("*a"))
+        cf:close()
+        if ok and type(cr) == "table" then
+            snap.child_reports = cr
+        end
+    end
+    
+    -- Device profiles from master UCI (for sub-node enrichment)
+    snap.devices = {}
+    uci:foreach("devicemaster", "device", function(s)
+        if s.mac then
+            snap.devices[s.mac:upper()] = {
+                vendor = s.vendor or "",
+                devtype = s.type or "",
+                name = s.name or "",
+                hostname = s.hostname or ""
+            }
+        end
+    end)
+    
+    -- Write snapshot
+    local tmp = "/tmp/dm_snapshot.json.tmp"
+    local sf = io.open(tmp, "w")
+    if sf then
+        sf:write(json.stringify(snap))
+        sf:close()
+        os.rename(tmp, "/tmp/dm_snapshot.json")  -- atomic
+    end
+end
+
+-- ============================================================
+-- Snapshot API: GET - sub nodes pull master data
+-- ============================================================
+function api_snapshot()
+    -- Read the pre-written snapshot file
+    local f = io.open("/tmp/dm_snapshot.json", "r")
+    if f then
+        local data = f:read("*a")
+        f:close()
+        json_response(json.parse(data) or { error = "parse failed" })
+    else
+        json_response({ error = "snapshot not available" })
+    end
+end
+
+-- ============================================================
+-- Report API: POST - sub nodes push their local stations
+-- ============================================================
+function api_report()
+    local raw = luci.http.content()
+    if not raw or raw == "" then
+        json_response({ success = false, error = "no data" })
+        return
+    end
+    local ok, data = pcall(json.parse, raw)
+    if not ok or type(data) ~= "table" then
+        json_response({ success = false, error = "invalid json" })
+        return
+    end
+    
+    -- Validate required fields
+    if not data.node_mac or not data.stations then
+        json_response({ success = false, error = "missing node_mac or stations" })
+        return
+    end
+    
+    -- Read existing child_reports, merge this node's report
+    local reports = {}
+    local cf = io.open("/tmp/dm_child_reports.json", "r")
+    if cf then
+        local ok2, existing = pcall(json.parse, cf:read("*a"))
+        cf:close()
+        if ok2 and type(existing) == "table" then
+            reports = existing
+        end
+    end
+    
+    reports[data.node_mac:upper()] = {
+        ts = os.time(),
+        stations = data.stations,
+        iface = data.iface or ""
+    }
+    
+    local wf = io.open("/tmp/dm_child_reports.json", "w")
+    if wf then
+        wf:write(json.stringify(reports))
+        wf:close()
+    end
+    
+    json_response({ success = true })
+end
+
+-- Unauthenticated report endpoint for sub-node push (mesh internal communication)
+function api_report_sub()
+    local raw = luci.http.content()
+    if not raw or raw == "" then
+        json_response({ success = false, error = "no data" })
+        return
+    end
+    local ok, data = pcall(json.parse, raw)
+    if not ok or type(data) ~= "table" then
+        json_response({ success = false, error = "invalid json" })
+        return
+    end
+    
+    if not data.node_mac then
+        json_response({ success = false, error = "missing node_mac" })
+        return
+    end
+    
+    local reports = {}
+    -- Atomic read-merge-write (use lock file)
+    local lock = "/tmp/dm_child_reports.lock"
+    local locked = false
+    for i = 1, 10 do
+        local lf = io.open(lock, "w")
+        if lf then lf:close(); locked = true; break end
+        sys.exec("usleep 100000 2>/dev/null")  -- wait 100ms
+    end
+    if not locked then
+        json_response({success = false, error = "Could not acquire lock"})
+        return
+    end
+
+    local cf = io.open("/tmp/dm_child_reports.json", "r")
+    if cf then
+        local ok2, existing = pcall(json.parse, cf:read("*a"))
+        cf:close()
+        if ok2 and type(existing) == "table" then
+            reports = existing
+        end
+    end
+
+    reports[data.node_mac:upper()] = {
+        ts = os.time(),
+        stations = data.stations or {},
+        dhcp_leases = data.dhcp_leases or {},
+        arp = data.arp or {},
+        devices = data.devices or {},
+        iface = data.iface or ""
+    }
+
+    -- Atomic write: temp file + rename
+    local tmp = "/tmp/dm_child_reports.json.tmp"
+    local wf = io.open(tmp, "w")
+    if wf then
+        wf:write(json.stringify(reports))
+        wf:close()
+        os.rename(tmp, "/tmp/dm_child_reports.json")  -- atomic
+    end
+
+    os.remove(lock)  -- release lock
+    
+    json_response({ success = true })
+end
+
+-- Helper: Identify mesh nodes and children
+-- Mesh node sources (priority order):
+--   1. iw station dump MAC matches a UCI device
+--   2. Bridge FDB: non-local MACs on wl1-mesh0 port
+--        Mesh node = type=network device whose OUI matches main router
+--        Others on same port = mesh_children
+local function identify_topology(bandix_uplink, wifi_stations, mesh_stations, dhcp_leases)
+    local mesh_nodes = {}
+    local mesh_children = {}
+    local mesh_port  -- cached wl1-mesh0 bridge port number
+    
+    local function find_uci_device(mac)
+        local result = nil
+        uci:foreach("devicemaster", "device", function(s)
+            if s.mac and s.mac:upper() == mac then
+                result = s
+                return false
+            end
+        end)
+        return result
+    end
+    
+    -- Get main router OUI from br-lan MAC (to identify same-brand mesh node)
+    local br_out = sys.exec("ip link show dev br-lan 2>/dev/null | grep 'link/ether' | awk '{print $2}'")
+    local router_oui = br_out and br_out:upper():match("^([0-9A-F]+:[0-9A-F]+:[0-9A-F]+)") or nil
+    
+    -- Parse bridge FDB to find wl1-mesh0 port and collect mesh-connected MACs
+    local fdb_macs = {}  -- non-local MACs on the mesh port
+    local mesh_vmac = get_mesh_vmac()
+    if router_oui and mesh_vmac then
+        local fdb = sys.exec("brctl showmacs br-lan 2>/dev/null")
+        if fdb and fdb ~= "" then
+            for line in fdb:gmatch("[^\r\n]+") do
+                local port, mac, is_local = line:match("^%s*(%d+)%s+([0-9a-fA-F:]+)%s+(%S+)")
+                if port and mac then
+                    local mac_u = mac:upper()
+                    if is_local == "yes" and mac_u == mesh_vmac then
+                        mesh_port = port
+                    end
+                end
+            end
+            if mesh_port then
+                for line in fdb:gmatch("[^\r\n]+") do
+                    local port, mac, is_local = line:match("^%s*(%d+)%s+([0-9a-fA-F:]+)%s+(%S+)")
+                    if port and port == mesh_port and mac and is_local == "no" then
+                        table.insert(fdb_macs, mac:upper())
+                    end
+                end
+            end
+        end
+    end
+    
+    -- No mesh stations → no mesh topology
+    if not next(mesh_stations) then
+        return mesh_nodes, mesh_children
+    end
+    
+    local lan_prefix = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1"):match("^(%d+%.%d+%.%d+)")
+    if not lan_prefix then
+        return mesh_nodes, mesh_children
+    end
+    
+    -- Step 1: mesh nodes from mesh station dump (matches real UCI mesh peers)
+    for mac, _ in pairs(mesh_stations) do
+        if not mesh_nodes[mac] then
+            local uci_dev = find_uci_device(mac)
+            if uci_dev then
+                mesh_nodes[mac] = {
+                    ip = uci_dev.last_ip or "",
+                    hostname = uci_dev.hostname or "",
+                    child_macs = {},
+                    mesh_connected = true
+                }
+            end
+        end
+    end
+    
+    -- Step 2: bridge FDB — identify mesh nodes + children from wl1-mesh0 port
+    if not next(mesh_nodes) and next(fdb_macs) and router_oui then
+        -- 2a: mesh node = type=network device whose OUI matches the main router
+        for _, mac in ipairs(fdb_macs) do
+            local mac_oui = mac:match("^([0-9A-F]+:[0-9A-F]+:[0-9A-F]+)")
+            if mac_oui and mac_oui == router_oui then
+                local uci_dev = find_uci_device(mac)
+                if uci_dev then
+                    mesh_nodes[mac] = {
+                        ip = uci_dev.last_ip or "",
+                        hostname = uci_dev.hostname or "",
+                        child_macs = {},
+                        mesh_connected = true
+                    }
+                    break
+                end
+            end
+        end
+    end
+    
+    -- 2b: remaining MACs on mesh port → mesh_children (only when mesh nodes exist)
+    if next(mesh_nodes) then
+        for _, mac in ipairs(fdb_macs) do
+            if not mesh_nodes[mac] and not wifi_stations[mac] then
+                local uci_dev = find_uci_device(mac)
+                if uci_dev then
+                    mesh_children[mac] = {
+                        ip = uci_dev.last_ip or "",
+                        hostname = uci_dev.hostname or "",
+                        parent_mac = nil
+                    }
+                end
+            end
+        end
+        
+        -- 2c: DHCP lease MACs on LAN subnet (not already identified) → mesh_children
+        for mac, info in pairs(dhcp_leases) do
+            if not wifi_stations[mac] and not mesh_nodes[mac] and not mesh_children[mac] then
+                local device_prefix = info.ip:match("^(%d+%.%d+%.%d+)")
+                if device_prefix and device_prefix == lan_prefix then
+                    mesh_children[mac] = {
+                        ip = info.ip,
+                        hostname = info.hostname or "",
+                        parent_mac = nil
+                    }
+                end
+            end
+        end
+    end
+    
+    return mesh_nodes, mesh_children
+end
+
+-- Helper: Get device online status and IPs (Topology-aware)
+-- Returns: online_macs, all_arp, wifi_stations, mesh_info
 local function get_arp_online()
     local online = {}
     local all_arp = {}
-    local stale_macs = {}  -- STALE devices that need ping probe
+    local probe_macs = {}
+
+    -- Get basic data
+    local wifi_stations = get_wifi_stations()
+    local mesh_stations = get_mesh_stations()
+    local dhcp_leases = get_dhcp_leases()
+    local bandix_uplink = get_bandix_uplink()
+    
+    -- Identify topology (uses Bandix if available, otherwise falls back)
+    local mesh_nodes, mesh_children = identify_topology(bandix_uplink, wifi_stations, mesh_stations, dhcp_leases)
 
     -- Read /proc/net/arp for all known device IPs
     local f = io.open("/proc/net/arp", "r")
     if f then
-        local header = f:read("*l")  -- skip header
+        local header = f:read("*l")
         if header then
             for line in f:lines() do
                 local ip, hw_type, flags, mac = line:match(
@@ -92,33 +649,85 @@ local function get_arp_online()
         f:close()
     end
 
-    -- Read ip neigh for accurate online status
+    -- Tier 1: WiFi stations are always online
+    -- Try to find IP from ARP, DHCP, or ip neigh (any state)
+    local neigh_by_mac = {}
+    local neigh_raw = sys.exec("ip neigh show dev br-lan 2>/dev/null")
+    if neigh_raw and neigh_raw ~= "" then
+        for line in neigh_raw:gmatch("[^\r\n]+") do
+            local nip, nmac = line:match("^(%d+%.%d+%.%d+%.%d+)%s+lladdr%s+([0-9a-fA-F:]+)")
+            if nip and nmac then
+                neigh_by_mac[nmac:upper()] = nip
+            end
+        end
+    end
+    
+    -- Build IP→MAC mapping from DHCP (source of truth for IP assignments)
+    -- This handles cases where sub-routers (like JI-weixing) assign IPs to downstream devices
+    -- and the main router only sees the sub-router's MAC in ARP
+    local dhcp_ip_to_mac = {}
+    for mac, info in pairs(dhcp_leases) do
+        if info.ip and info.ip ~= "" then
+            dhcp_ip_to_mac[info.ip] = mac
+        end
+    end
+    
+    for mac, _ in pairs(wifi_stations) do
+        online[mac] = all_arp[mac] or (dhcp_leases[mac] and dhcp_leases[mac].ip) or neigh_by_mac[mac] or ""
+    end
+
+    -- Tier 2: ip neigh REACHABLE/PERMANENT
+    -- Skip ARP entries where IP is already claimed by DHCP for a different MAC
     local output = sys.exec("ip neigh show dev br-lan 2>/dev/null")
     if output and output ~= "" then
         for line in output:gmatch("[^\r\n]+") do
             local ip, mac, state = line:match(
-                "^(%d+%.%d+%.%d+%.%d+)%s+%S+%s+%S+%s+([0-9a-fA-F:]+)%s+(%S+)"
+                "^(%d+%.%d+%.%d+%.%d+)%s+lladdr%s+([0-9a-fA-F:]+)%s+(%S+)"
             )
             if mac and state then
                 state = state:upper()
                 mac = mac:upper()
-                -- REACHABLE = confirmed online (active communication)
-                -- PERMANENT = static ARP entry (always considered online)
-                if state == "REACHABLE" or state == "PERMANENT" then
-                    online[mac] = ip
-                elseif state == "STALE" then
-                    -- STALE devices: mark for ping probe
-                    stale_macs[mac] = ip
+                if state == "REACHABLE" or state == "PERMANENT" or state == "STALE" or state == "DELAY" then
+                    -- Skip if this IP is claimed by DHCP for a different MAC
+                    -- (indicates sub-router is NATting or doing DHCP for downstream devices)
+                    local dhcp_owner = dhcp_ip_to_mac[ip]
+                    if dhcp_owner and dhcp_owner ~= mac then
+                        -- Skip this ARP entry, use DHCP's mapping instead
+                    else
+                        online[mac] = ip
+                    end
                 end
             end
         end
     end
 
-    -- Active probe: ping STALE devices to confirm online status
-    -- This provides fast detection when user is viewing the device list
-    for mac, ip in pairs(stale_macs) do
-        -- Quick ping: 1 packet, 1 second timeout (validate IP to prevent injection)
-        if is_valid_ip(ip) then
+    -- Tier 3: IoT devices with DHCP leases are always online (no ARP/ping needed)
+    local iot_macs = {}
+    uci:foreach("devicemaster", "device", function(s)
+        if s.mac and s.type == "iot" then
+            iot_macs[s.mac:upper()] = true
+        end
+    end)
+    for mac, info in pairs(dhcp_leases) do
+        if not online[mac] and iot_macs[mac] then
+            online[mac] = info.ip
+        end
+    end
+
+    -- Tier 4: Ping probe for non-WiFi devices
+    -- Skip ARP entries where IP is already claimed by DHCP for a different MAC
+    for mac, ip in pairs(all_arp) do
+        if not online[mac] and not wifi_stations[mac] and is_valid_ip(ip) then
+            local dhcp_owner = dhcp_ip_to_mac[ip]
+            if not (dhcp_owner and dhcp_owner ~= mac) then
+                probe_macs[mac] = ip
+            end
+        end
+    end
+
+    -- Ping probe
+    for mac, ip in pairs(probe_macs) do
+        if not online[mac] and is_valid_ip(ip) then
             local ping_result = sys.exec("ping -c 1 -W 1 " .. ip .. " 2>/dev/null && echo OK || echo FAIL")
             if ping_result:match("OK") then
                 online[mac] = ip
@@ -126,12 +735,70 @@ local function get_arp_online()
         end
     end
 
-    -- Fallback: if ip neigh returned nothing, use /proc/net/arp
+    -- Special: Mesh node online if any child is online
+    -- A mesh_child is considered online if:
+    --   1. It's in the online table (ip neigh REACHABLE), OR
+    --   2. It has a DHCP lease (recently active on the network)
+    -- This prevents the mesh node from flickering offline when
+    -- ip neigh entries briefly go STALE between probes.
+    local node_count = 0
+    local first_node_mac = nil
+    for node_mac, node_info in pairs(mesh_nodes) do
+        node_count = node_count + 1
+        if not first_node_mac then first_node_mac = node_mac end
+    end
+    
+    -- Helper: check if a mesh_child is online
+    local function is_child_online(mac)
+        if online[mac] then return true end
+        if all_arp[mac] then return true end
+        if dhcp_leases[mac] then return true end
+        return false
+    end
+    
+    -- If only 1 mesh node, all non-direct devices belong to it
+    if node_count == 1 and first_node_mac then
+        local has_online_child = false
+        -- mesh_children are non-direct devices
+        for child_mac, child_info in pairs(mesh_children) do
+            child_info.parent_mac = first_node_mac
+            table.insert(mesh_nodes[first_node_mac].child_macs, child_mac)
+            if is_child_online(child_mac) then
+                has_online_child = true
+            end
+        end
+        -- If any child is online, node is online
+        if has_online_child then
+            online[first_node_mac] = mesh_nodes[first_node_mac].ip
+        end
+    elseif node_count > 1 then
+        -- Multiple mesh nodes: link children based on online status
+        for node_mac, node_info in pairs(mesh_nodes) do
+            local has_online_child = false
+            for child_mac, child_info in pairs(mesh_children) do
+                if is_child_online(child_mac) and not child_info.parent_mac then
+                    has_online_child = true
+                    child_info.parent_mac = node_mac
+                    table.insert(node_info.child_macs, child_mac)
+                end
+            end
+            if has_online_child then
+                online[node_mac] = node_info.ip
+            end
+        end
+    end
+
+    -- Fallback
     if next(online) == nil then
         online = all_arp
     end
 
-    return online, all_arp
+    local mesh_info = {
+        nodes = mesh_nodes,
+        children = mesh_children
+    }
+
+    return online, all_arp, wifi_stations, mesh_info
 end
 
 -- Helper: Get DHCP leases as { mac = hostname }
@@ -152,179 +819,495 @@ local function get_dhcp_hostnames()
     return hostnames
 end
 
--- ============================================================
--- Bandix Integration
--- Detect Bandix service and fetch traffic/connection data
--- Falls back to own logic when Bandix is not available
--- ============================================================
-
--- Cache: bandix availability (checked once per request)
-local _bandix_checked = false
-local _bandix_available = false
-local _bandix_port = nil
-
--- Detect if Bandix service is running
-local function is_bandix_available()
-    if _bandix_checked then return _bandix_available end
-    _bandix_checked = true
-
-    -- Check if bandix process is running
-    local pid = sys.exec("pidof bandix 2>/dev/null"):gsub("\n", "")
-    if pid == "" then return false end
-
-    -- Read port from UCI config
-    _bandix_port = uci:get("bandix", "general", "port") or "8686"
-
-    -- Quick connectivity check
-    local test = sys.exec("curl -s --connect-timeout 1 --max-time 2 'http://127.0.0.1:" .. _bandix_port .. "/api/traffic/devices' 2>/dev/null")
-    if test and test:find('"status":"success"') then
-        _bandix_available = true
+-- Helper: Get all MACs in DHCP leases (regardless of hostname)
+local function get_dhcp_macs()
+    local macs = {}
+    local f = io.open("/tmp/dhcp.leases", "r")
+    if not f then return macs end
+    for line in f:lines() do
+        local ts, mac = line:match("^(%d+)%s+(%S+)")
+        if mac then
+            macs[mac:upper()] = true
+        end
     end
-    return _bandix_available
+    f:close()
+    return macs
 end
 
--- Fetch Bandix traffic devices data
--- Returns: { ["MAC"] = { rx_rate, tx_rate, rx_bytes, tx_bytes, conn_type, uplink, wan_rx_limit, wan_tx_limit } }
-local function get_bandix_traffic()
-    local data = {}
-    if not is_bandix_available() then return data end
+-- Session data stored in tmpfs (RAM), avoiding Flash writes
+local SESSION_FILE = "/var/run/devicemaster/session.json"
+-- Probe cache (file-backed to persist across CGI requests)
+local PROBE_CACHE_FILE = "/tmp/dm_probe_cache.json"
 
-    -- Fetch once, cache the response
-    local response = sys.exec("curl -s --connect-timeout 2 --max-time 5 'http://127.0.0.1:"
-        .. (_bandix_port or "8686") .. "/api/traffic/devices' 2>/dev/null")
-    if not response or response == "" then return data end
+local function load_probe_cache()
+    local f = io.open(PROBE_CACHE_FILE, "r")
+    if not f then return {} end
+    local content = f:read("*a")
+    f:close()
+    if content and content ~= "" then
+        local ok, data = pcall(json.parse, content)
+        if ok and type(data) == "table" then return data end
+    end
+    return {}
+end
 
-    -- Save response to temp file and use jsonfilter per device
-    sys.exec("echo '" .. response:gsub("'", "'\\''") .. "' > /tmp/bandix_traffic_cache.json")
+local function save_probe_cache(cache)
+    local tmp = PROBE_CACHE_FILE .. ".tmp"
+    local sf = io.open(tmp, "w")
+    if sf then
+        sf:write(json.stringify(cache))
+        sf:close()
+        os.rename(tmp, PROBE_CACHE_FILE)  -- atomic
+    end
+end
 
-    -- Get MAC list
-    local macs = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '@.data.d[*].mac' 2>/dev/null")
-    if macs == "" then return data end
+local function load_session()
+    local f = io.open(SESSION_FILE, "r")
+    if not f then return { devices = {} } end
+    local content = f:read("*all")
+    f:close()
+    if content and content ~= "" then
+        local ok, data = pcall(json.parse, content)
+        if ok and data then return data end
+    end
+    return { devices = {} }
+end
 
+local function save_session(data)
+    -- Ensure directory exists
+    sys.exec("mkdir -p /var/run/devicemaster 2>/dev/null")
+    local tmp = SESSION_FILE .. ".tmp"
+    local f = io.open(tmp, "w")
+    if f then
+        f:write(json.stringify(data))
+        f:close()
+        os.rename(tmp, SESSION_FILE)  -- atomic
+    end
+end
+
+-- Response cache: avoid heavy computation on every frontend poll
+local response_cache_str = nil
+local response_cache_time = 0
+local CACHE_TTL = 15
+
+-- ============================================================
+-- API: Set device monitor mode (active/idle)
+-- Called by frontend when page opens/closes
+-- ============================================================
+function api_set_mode()
+    local mode = luci.http.formvalue("mode") or "idle"
+    local f = io.open("/tmp/dm_mode", "w")
+    if f then
+        f:write(mode)
+        f:close()
+    end
+    -- Also update legacy page_active file for backward compat
+    if mode == "active" then
+        f = io.open("/tmp/dm_page_active", "w")
+        if f then f:write(tostring(os.time())); f:close() end
+    end
+    json_response({success = true, mode = mode})
+end
+
+-- ============================================================
+-- API: Merge multiple devices into one (for rotating MAC addresses)
+-- POST: primary_mac=xx&secondary_macs=yy,zz
+-- Auto-select online MAC as primary
+-- ============================================================
+function api_merge_devices()
+    local primary_mac = luci.http.formvalue("primary_mac") or ""
+    local secondary_macs = luci.http.formvalue("secondary_macs") or ""
+    
+    primary_mac = primary_mac:upper():gsub("-", ":")
+    
+    if primary_mac == "" or secondary_macs == "" then
+        json_response({success = false, error = "Missing parameters"})
+        return
+    end
+    
+    -- Collect all MACs (primary + secondary)
+    local all_macs = {primary_mac}
+    for mac in secondary_macs:gmatch("[^,]+") do
+        mac = mac:upper():gsub("-", ":")
+        if mac ~= primary_mac then
+            table.insert(all_macs, mac)
+        end
+    end
+    
+    -- Check which MAC is online (via ARP table)
+    local arp_online = {}
+    local arp_file = io.open("/proc/net/arp", "r")
+    if arp_file then
+        for line in arp_file:lines() do
+            local mac = line:match("(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)")
+            if mac then
+                arp_online[mac:upper()] = true
+            end
+        end
+        arp_file:close()
+    end
+    
+    -- Find the online MAC as primary
+    local online_mac = nil
+    for _, mac in ipairs(all_macs) do
+        if arp_online[mac] then
+            online_mac = mac
+            break
+        end
+    end
+    
+    -- If no online MAC, use the first one
+    if not online_mac then
+        online_mac = all_macs[1]
+    end
+    
+    -- Find primary device (the online one or first one)
+    local primary_idx = nil
     local idx = 0
-    for mac in macs:gmatch("[^\n]+") do
-        mac = mac:gsub("\r", "")
-        if mac ~= "" then
-            local p = "@.data.d[" .. idx .. "]"
-            local rx_r = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".t_rx_r' 2>/dev/null"):gsub("\n", "")
-            local tx_r = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".t_tx_r' 2>/dev/null"):gsub("\n", "")
-            local rx_b = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".t_rx_b' 2>/dev/null"):gsub("\n", "")
-            local tx_b = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".t_tx_b' 2>/dev/null"):gsub("\n", "")
-            local conn = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".conn' 2>/dev/null"):gsub("\n", "")
-            local uplink = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".uplink' 2>/dev/null"):gsub("\n", "")
-            local w_rx_l = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".w_rx_l' 2>/dev/null"):gsub("\n", "")
-            local w_tx_l = sys.exec("jsonfilter -i /tmp/bandix_traffic_cache.json -e '" .. p .. ".w_tx_l' 2>/dev/null"):gsub("\n", "")
-            data[mac:upper()] = {
-                rx_rate = tonumber(rx_r) or 0,
-                tx_rate = tonumber(tx_r) or 0,
-                rx_bytes = tonumber(rx_b) or 0,
-                tx_bytes = tonumber(tx_b) or 0,
-                conn_type = conn or "",
-                uplink = uplink or "",
-                wan_rx_limit = tonumber(w_rx_l) or 0,
-                wan_tx_limit = tonumber(w_tx_l) or 0
-            }
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
+        if not mac then break end
+        if mac:upper() == online_mac then
+            primary_idx = idx
+            break
         end
         idx = idx + 1
     end
-    return data
-end
-
--- Fetch Bandix connection data
--- Returns: { ["MAC"] = { tcp, udp, tcp_est, total } }
-local function get_bandix_connections()
-    local data = {}
-    if not is_bandix_available() then return data end
-
-    -- Check if connection monitoring is enabled
-    local conn_enabled = uci:get("bandix", "connections", "enabled")
-    if conn_enabled ~= "1" then return data end
-
-    -- Reuse cached traffic response if available, otherwise fetch fresh
-    local response = sys.exec("curl -s --connect-timeout 2 --max-time 5 'http://127.0.0.1:"
-        .. (_bandix_port or "8686") .. "/api/connection/devices' 2>/dev/null")
-    if not response or response == "" then return data end
-
-    sys.exec("echo '" .. response:gsub("'", "'\\''") .. "' > /tmp/bandix_conn_cache.json")
-
-    local macs = sys.exec("jsonfilter -i /tmp/bandix_conn_cache.json -e '@.data.d[*].mac' 2>/dev/null")
-    if macs == "" then return data end
-
-    local idx = 0
-    for mac in macs:gmatch("[^\n]+") do
-        mac = mac:gsub("\r", "")
-        if mac ~= "" then
-            local p = "@.data.d[" .. idx .. "]"
-            local tcp = sys.exec("jsonfilter -i /tmp/bandix_conn_cache.json -e '" .. p .. ".tcp' 2>/dev/null"):gsub("\n", "")
-            local udp = sys.exec("jsonfilter -i /tmp/bandix_conn_cache.json -e '" .. p .. ".udp' 2>/dev/null"):gsub("\n", "")
-            local tcp_est = sys.exec("jsonfilter -i /tmp/bandix_conn_cache.json -e '" .. p .. ".tcp_est' 2>/dev/null"):gsub("\n", "")
-            local total = sys.exec("jsonfilter -i /tmp/bandix_conn_cache.json -e '" .. p .. ".total' 2>/dev/null"):gsub("\n", "")
-            data[mac:upper()] = {
-                tcp = tonumber(tcp) or 0,
-                udp = tonumber(udp) or 0,
-                tcp_est = tonumber(tcp_est) or 0,
-                total = tonumber(total) or 0
-            }
+    
+    if not primary_idx then
+        json_response({success = false, error = "Primary device not found"})
+        return
+    end
+    
+    -- Get current alt_macs
+    local current_alt = uci:get("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs") or ""
+    local alt_set = {}
+    for mac in current_alt:gmatch("[^,]+") do
+        alt_set[mac:upper()] = true
+    end
+    
+    -- Add other MACs as alt_macs
+    local new_macs = {}
+    for _, mac in ipairs(all_macs) do
+        if mac ~= online_mac and not alt_set[mac] then
+            table.insert(new_macs, mac)
+            alt_set[mac] = true
+        end
+    end
+    
+    if #new_macs > 0 then
+        local new_alt = current_alt
+        if new_alt ~= "" then new_alt = new_alt .. "," end
+        new_alt = new_alt .. table.concat(new_macs, ",")
+        uci:set("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs", new_alt)
+    end
+    
+    -- Update last_seen for online device
+    uci:set("devicemaster", "@device[" .. primary_idx .. "]", "last_seen", tostring(os.time()))
+    uci:commit("devicemaster")
+    
+    -- Remove secondary devices from UCI (they are now merged)
+    local to_remove = {}
+    idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
+        if not mac then break end
+        for _, sec_mac in ipairs(new_macs) do
+            if mac:upper() == sec_mac then
+                table.insert(to_remove, idx)
+                break
+            end
         end
         idx = idx + 1
     end
-    return data
+    
+    -- Remove from highest index to lowest to avoid shifting issues
+    for i = #to_remove, 1, -1 do
+        uci:delete("devicemaster", "@device[" .. to_remove[i] .. "]")
+    end
+    if #to_remove > 0 then
+        uci:commit("devicemaster")
+    end
+    
+    json_response({success = true, primary_mac = online_mac, merged_macs = new_macs, note = "Primary MAC selected based on online status"})
 end
 
--- Set Bandix rate limit for a device
--- rate: string like "1mbit", converted to bytes/sec for Bandix API
-local function bandix_set_limit(mac, rate)
-    if not is_bandix_available() then return false end
-
-    -- Parse rate string to bytes/sec
-    local num, unit = rate:match("^(%d+)([kmgb]?bit)$")
-    if not num then return false end
-    num = tonumber(num)
-    local bytes_per_sec = 0
-    if unit == "kbit" then
-        bytes_per_sec = math.floor(num * 1000 / 8)
-    elseif unit == "mbit" then
-        bytes_per_sec = math.floor(num * 1000000 / 8)
-    elseif unit == "gbit" then
-        bytes_per_sec = math.floor(num * 1000000000 / 8)
+-- ============================================================
+-- API: Unmerge a device (restore secondary MAC as separate device)
+-- POST: primary_mac=xx&alt_mac=yy
+-- ============================================================
+function api_unmerge_device()
+    local primary_mac = luci.http.formvalue("primary_mac") or ""
+    local alt_mac = luci.http.formvalue("alt_mac") or ""
+    
+    primary_mac = primary_mac:upper():gsub("-", ":")
+    alt_mac = alt_mac:upper():gsub("-", ":")
+    
+    if primary_mac == "" or alt_mac == "" then
+        json_response({success = false, error = "Missing parameters"})
+        return
+    end
+    
+    -- Find primary device
+    local primary_idx = nil
+    local idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. idx .. "]", "mac")
+        if not mac then break end
+        if mac:upper() == primary_mac then
+            primary_idx = idx
+            break
+        end
+        idx = idx + 1
+    end
+    
+    if not primary_idx then
+        json_response({success = false, error = "Primary device not found"})
+        return
+    end
+    
+    -- Get and update alt_macs
+    local alt_macs = uci:get("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs") or ""
+    local new_alts = {}
+    local found = false
+    for mac in alt_macs:gmatch("[^,]+") do
+        if mac:upper() ~= alt_mac then
+            table.insert(new_alts, mac)
+        else
+            found = true
+        end
+    end
+    
+    if not found then
+        json_response({success = false, error = "Alt MAC not found in primary device"})
+        return
+    end
+    
+    uci:set("devicemaster", "@device[" .. primary_idx .. "]", "alt_macs", table.concat(new_alts, ","))
+    
+    -- Check if the alt_mac already exists as a separate device
+    local mac_exists = false
+    local check_idx = 0
+    while true do
+        local mac = uci:get("devicemaster", "@device[" .. check_idx .. "]", "mac")
+        if not mac then break end
+        if mac:upper() == alt_mac then
+            mac_exists = true
+            break
+        end
+        check_idx = check_idx + 1
+    end
+    
+    if mac_exists then
+        -- MAC already exists, just remove from alt_macs without creating duplicate
+        uci:commit("devicemaster")
+        json_response({success = true, primary_mac = primary_mac, unmerged_mac = alt_mac, note = "MAC already exists as separate device"})
     else
-        bytes_per_sec = math.floor(num / 8)
+        -- Create new device for the unmerged MAC
+        local new_device = uci:add("devicemaster", "device")
+        uci:set("devicemaster", new_device, "mac", alt_mac)
+        uci:set("devicemaster", new_device, "vendor", "LAA")
+        uci:set("devicemaster", new_device, "type", "unknown")
+        uci:set("devicemaster", new_device, "hostname", "*")
+        uci:set("devicemaster", new_device, "first_seen", tostring(os.time()))
+        uci:set("devicemaster", new_device, "last_seen", tostring(os.time()))
+        uci:commit("devicemaster")
+        json_response({success = true, primary_mac = primary_mac, unmerged_mac = alt_mac})
     end
-
-    local cmd = "curl -s --connect-timeout 3 --max-time 10 -X POST -H 'Content-Type: application/json' "
-        .. "-d '{\"mac\":\"" .. mac .. "\",\"wan_rx_rate_limit\":" .. bytes_per_sec
-        .. ",\"wan_tx_rate_limit\":" .. bytes_per_sec .. "}' "
-        .. "'http://127.0.0.1:" .. (_bandix_port or "8686") .. "/api/traffic/limits' 2>/dev/null"
-    local result = sys.exec(cmd)
-    return result and result:find('"status":"success"') ~= nil
-end
-
--- Remove Bandix rate limit for a device
-local function bandix_remove_limit(mac)
-    if not is_bandix_available() then return false end
-
-    local cmd = "curl -s --connect-timeout 3 --max-time 10 -X DELETE -H 'Content-Type: application/json' "
-        .. "-d '{\"mac\":\"" .. mac .. "\"}' "
-        .. "'http://127.0.0.1:" .. (_bandix_port or "8686") .. "/api/traffic/limits' 2>/dev/null"
-    local result = sys.exec(cmd)
-    return result and result:find('"status":"success"') ~= nil
 end
 
 -- ============================================================
 -- Core API: Real-time device status
 -- Reads UCI profiles + ARP online status, joins in memory
--- No cache files, no background daemons needed
+-- Uses response cache to reduce load on hostapd/netifd
 -- ============================================================
 function api_status()
-    local online_macs, all_arp = get_arp_online()
-    local dhcp_names = get_dhcp_hostnames()
+    -- Mark page as active (device_monitor uses this to decide discover frequency)
+    local f = io.open("/tmp/dm_page_active", "w")
+    if f then f:write(tostring(os.time())); f:close() end
 
-    -- Fetch Bandix data (traffic + connections) if available
-    local bandix_traffic = get_bandix_traffic()
-    local bandix_connections = get_bandix_connections()
-    local has_bandix = is_bandix_available()
+    -- Return cached response if still fresh (eliminates ALL subprocess spawning)
+    local now = os.time()
+    if response_cache_str and now - response_cache_time < CACHE_TTL then
+        luci.http.prepare_content("application/json")
+        luci.http.write(response_cache_str)
+        return
+    end
+    local online_macs, all_arp, wifi_stations, mesh_info = get_arp_online()
+    -- Save local online state before merging master data (for ping probe comparison)
+    local local_online = {}
+    for mac, ip in pairs(online_macs) do
+        local_online[mac] = ip
+    end
+    local dhcp_names = get_dhcp_hostnames()
+    local dhcp_macs = get_dhcp_macs()
+
+    -- Helpers for enrichment: reject incomplete vendor/type values
+    local function useful_vendor(v)
+        if not v or v == "" then return false end
+        local vu = v:upper()
+        if vu == "LAA" or vu == "UNKNOWN" or vu == "未知" then return false end
+        return true
+    end
+    local function useful_type(t)
+        if not t or t == "" then return false end
+        if t:upper() == "UNKNOWN" then return false end
+        return true
+    end
+    
+    -- Sub-node: pull master snapshot to supplement remote device data
+    local role_info = detect_role()
+    local remote_dhcp = {}
+    local remote_arp = {}
+    local remote_devices = {}
+    local known_offline = {}
+    if role_info.role == "sub" and role_info.master_ip ~= "" then
+        local snap = nil
+        local SNAP_CACHE_FILE = "/tmp/dm_snap_cache.json"
+        local cf = io.open(SNAP_CACHE_FILE, "r")
+        if cf then
+            local ok2, cached = pcall(json.parse, cf:read("*a"))
+            cf:close()
+            if ok2 and type(cached) == "table" and os.time() - (cached._cached_at or 0) < 30 then
+                snap = cached
+            end
+        end
+        if not snap then
+            local snap_raw = sys.exec("curl -s --connect-timeout 2 --max-time 3 'http://" .. role_info.master_ip .. "/luci-static/resources/dm_snapshot.json' 2>/dev/null")
+            if snap_raw and snap_raw ~= "" then
+                local ok2, parsed = pcall(json.parse, snap_raw)
+                if ok2 and type(parsed) == "table" and parsed.role == "master" then
+                    parsed._cached_at = os.time()
+                    snap = parsed
+                    local wf = io.open(SNAP_CACHE_FILE, "w")
+                    if wf then wf:write(json.stringify(parsed)); wf:close() end
+                end
+            end
+        end
+        if snap then
+            remote_dhcp = snap.dhcp_leases or {}
+            remote_arp = snap.arp or {}
+            remote_devices = snap.devices or {}
+            for mac, info in pairs(remote_dhcp) do
+                dhcp_names[mac] = info.hostname or dhcp_names[mac]
+                dhcp_macs[mac] = true
+                local cur = online_macs[mac]
+                if (not cur or cur == "") and info.ip ~= "" then
+                    online_macs[mac] = info.ip
+                end
+                if not all_arp[mac] then
+                    all_arp[mac] = info.ip
+                end
+            end
+            -- Use master's computed online_macs (WiFi + DHCP + ip neigh REACHABLE)
+            -- instead of raw ARP, to avoid marking stale entries as online.
+            local master_online = snap.online_macs or {}
+            for mac, _ in pairs(master_online) do
+                local cur = online_macs[mac]
+                if not cur or cur == "" then
+                    local rip = remote_arp[mac] or (remote_dhcp[mac] and remote_dhcp[mac].ip) or ""
+                    if rip ~= "" then
+                        online_macs[mac] = rip
+                    end
+                end
+            end
+            -- Fill IPs for remaining local devices (WiFi stations with empty IP)
+            -- Skip if IP is already claimed by DHCP for a different MAC
+            for mac, ip in pairs(remote_arp) do
+                local dhcp_owner = dhcp_ip_to_mac[ip]
+                if dhcp_owner and dhcp_owner ~= mac then
+                    -- Skip: this IP is claimed by DHCP for a different MAC
+                else
+                    local cur = online_macs[mac]
+                    if cur == "" and ip ~= "" then
+                        online_macs[mac] = ip
+                    end
+                    if not all_arp[mac] then
+                        all_arp[mac] = ip
+                    end
+                end
+            end
+            -- 识别 mesh 主节点 MAC 并标记为在线
+            if snap.master_mac and snap.master_mac ~= "" then
+                if not online_macs[snap.master_mac] then
+                    online_macs[snap.master_mac] = role_info.master_ip
+                end
+                -- 确保主节点设备有厂商/类型信息，供 ARP-only 设备列表使用
+                if not remote_devices[snap.master_mac] then
+                    remote_devices[snap.master_mac] = {
+                        vendor = "",
+                        devtype = "network",
+                        name = "Mesh Master",
+                        hostname = ""
+                    }
+                end
+            end
+        end
+    end
 
     local devices = {}
+
+    -- Load runtime session data from RAM (tmpfs), not Flash
+    local session = load_session()
+
+    -- Compute LAN info once (avoids spawning subprocess per device)
+    -- ip route show dev br-lan may emit "default" before the subnet route, breaking regex
+    -- Use ip addr to get the node's own IP, then extract subnet prefix
+    local lan_ip = sys.exec("ip -4 addr show dev br-lan 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1")
+    local lan_prefix = lan_ip and lan_ip:match("^(%d+%.%d+%.%d+)") or nil
+
+    -- Load probe cache (file-backed for CGI persistence)
+    local probe_cache = load_probe_cache()
+    local probe_cache_dirty = false
+
+    -- Sub-node: filter out recently-ping-failed MACs (stale entries from master snapshot)
+    -- Prevents DHCP/ARP ghosts from re-entering online_macs on every snap re-fetch
+    if role_info.role == "sub" then
+        for mac, _ in pairs(online_macs) do
+            if not local_online[mac] then
+                local fail_check = probe_cache["fail|" .. mac] or 0
+                if os.time() - fail_check < 180 then
+                    online_macs[mac] = nil
+                end
+            end
+        end
+    end
+
+    -- Collect known-but-offline devices from master's UCI (remote_devices)
+    -- Runs AFTER the fail-marker filter so stale DHCP ghosts are excluded
+    known_offline = {}
+    if role_info.role == "sub" then
+        for mac, _ in pairs(remote_devices) do
+            local cur = online_macs[mac]
+            if not cur or cur == "" then
+                known_offline[mac] = remote_arp[mac] or (remote_dhcp[mac] and remote_dhcp[mac].ip) or ""
+            end
+        end
+    end
+
+    -- Sub-node: ping probe for devices only known from master data
+    -- This ensures the sub-node actively verifies mesh_child connectivity
+    -- rather than blindly trusting the master's ARP table
+    if role_info.role == "sub" then
+        for mac, ip in pairs(online_macs) do
+            if not local_online[mac] and ip ~= "" and is_valid_ip(ip) then
+                local cache_key = "remote|" .. mac .. "|" .. ip
+                local last_probe = probe_cache[cache_key] or 0
+                if os.time() - last_probe > 120 then
+                    probe_cache[cache_key] = os.time()
+                    probe_cache_dirty = true
+                    local ping_result = sys.exec("ping -c 1 -W 1 " .. ip .. " 2>/dev/null && echo OK || echo FAIL")
+                    if not ping_result:match("OK") then
+                        online_macs[mac] = nil
+                        probe_cache["fail|" .. mac] = os.time()
+                    end
+                end
+            end
+        end
+    end
+
+    -- Collect local MACs to filter router's own interfaces out of device list
+    local local_macs = get_local_macs()
 
     -- 1. Read all device profiles from UCI
     uci:foreach("devicemaster", "device", function(s)
@@ -333,38 +1316,53 @@ function api_status()
         local mac_upper = s.mac:upper()
         local ip = s.last_ip or online_macs[mac_upper] or ""
         local is_online = online_macs[mac_upper] ~= nil
-        local was_online = (s.online_status == "1")
-        
-        -- Track online duration: update when status changes
-        if is_online and not was_online then
-            -- Device just came online: record the time
-            uci:set("devicemaster", s[".name"], "last_online_at", tostring(os.time()))
-            uci:set("devicemaster", s[".name"], "online_status", "1")
-        elseif not is_online and was_online then
-            -- Device just went offline: calculate total online time since discovery
-            local last_at = s.last_online_at
-            local discovered = s.discovered_at
-            if last_at and last_at ~= "" and discovered and discovered ~= "" then
-                -- Total online = previous sessions + current session
-                local current_session = os.time() - tonumber(last_at)
-                local previous_total = tonumber(s.online_duration) or 0
-                -- If this is the first offline, previous_total is 0, but we need to count from discovered_at
-                if previous_total == 0 then
-                    -- First time going offline: count from discovered_at to now
-                    local total_online = os.time() - tonumber(discovered)
-                    uci:set("devicemaster", s[".name"], "online_duration", tostring(total_online))
-                elseif current_session > 0 then
-                    -- Subsequent offline: add current session to previous total
-                    local total = previous_total + current_session
-                    uci:set("devicemaster", s[".name"], "online_duration", tostring(total))
+
+        -- For merged devices: check if any alt_mac is online
+        local alt_online_ip = nil
+        if not is_online and s.alt_macs and s.alt_macs ~= "" then
+            for alt_mac in s.alt_macs:gmatch("[^,]+") do
+                local alt_ip = online_macs[alt_mac:upper()]
+                if alt_ip then
+                    is_online = true
+                    alt_online_ip = alt_ip
+                    break
                 end
             end
-            uci:set("devicemaster", s[".name"], "online_status", "0")
+        end
+
+        -- 非 LAN 子网设备：ARP 或 DHCP 租约中有记录就认为在线
+        if not is_online and ip ~= "" and lan_prefix then
+            local device_ip_prefix = ip:match("^(%d+%.%d+%.%d+)")
+            if device_ip_prefix and device_ip_prefix ~= lan_prefix then
+                if all_arp[mac_upper] or dhcp_macs[mac_upper] then
+                    is_online = true
+                end
+            end
+        end
+
+        -- WAN 侧设备探测：last_ip 在非 LAN 子网的有效设备，最多每 60 秒 ping 一次
+        if not is_online then
+            local stored_ip = s.last_ip or ""
+            if stored_ip ~= "" and lan_prefix and not stored_ip:match("^" .. lan_prefix:gsub("%.", "%%.")) then
+                local cache_key = mac_upper .. "|" .. stored_ip
+                local last_probe = probe_cache[cache_key] or 0
+                if os.time() - last_probe > 60 then
+                    probe_cache[cache_key] = os.time()
+                    probe_cache_dirty = true
+                    local probe = sys.exec("ping -c 1 -W 1 " .. stored_ip .. " 2>/dev/null && echo OK || echo FAIL")
+                    if probe:match("OK") then
+                        is_online = true
+                        ip = stored_ip
+                    end
+                end
+            end
         end
 
         -- If online, use the live IP from ARP
         if is_online and online_macs[mac_upper] then
             ip = online_macs[mac_upper]
+        elseif is_online and alt_online_ip then
+            ip = alt_online_ip
         end
 
         -- Filter out APIPA (169.254.x.x) addresses - these are self-assigned,
@@ -390,8 +1388,19 @@ function api_status()
         if not hostname or hostname == "" then
             hostname = dhcp_names[mac_upper]
         end
+        -- For merged devices: try alt_macs' DHCP hostnames if current hostname is useless
+        if (not hostname or hostname == "" or hostname == "*") and s.alt_macs and s.alt_macs ~= "" then
+            for alt_mac in s.alt_macs:gmatch("[^,]+") do
+                local alt_name = dhcp_names[alt_mac:upper()]
+                if alt_name and alt_name ~= "" and alt_name ~= "*" then
+                    hostname = alt_name
+                    break
+                end
+            end
+        end
         if not hostname or hostname == "" then
-            hostname = ""
+            local rp = remote_devices[mac_upper]
+            hostname = (rp and rp.hostname ~= "") and rp.hostname or ""
         end
 
         -- Check if MAC is randomized (locally administered bit)
@@ -406,95 +1415,121 @@ function api_status()
         -- Check if device is on a controllable network (not upstream)
         local is_controllable = true
         if ip and ip ~= "" then
-            -- Get LAN subnet from br-lan to determine controllability
-            local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1")
-            local lan_prefix = lan_net and lan_net:match("^(%d+%.%d+%.%d+)") or nil
             local device_prefix = ip:match("^(%d+%.%d+%.%d+)")
             if lan_prefix and device_prefix and device_prefix ~= lan_prefix then
                 is_controllable = false
             end
         end
 
-        -- Calculate cumulative online duration (total time spent online since discovery)
-        -- online_duration: stored cumulative seconds from past sessions
-        -- last_online_at: timestamp when device last came online
-        -- discovered_at: when device was first discovered
-        local online_seconds = 0
-        local stored_duration = tonumber(s.online_duration) or 0
-        local last_online_at = s.last_online_at
-        local discovered_at = s.discovered_at
+        -- Load runtime data from session.json (RAM), not UCI (Flash)
         local now = os.time()
+        local device_session = session.devices[mac_upper] or {}
+        local total_online = tonumber(device_session.total_online_time) or 0
+        local first_seen = tonumber(device_session.first_seen) or tonumber(s.discovered_at) or now
+        local last_seen = tonumber(device_session.last_seen) or first_seen
+        local session_start = tonumber(device_session.current_session_start) or now
         
-        if is_online then
-            -- Currently online: calculate total time online since discovery
-            -- If never went offline, use discovered_at as start
-            -- If went offline before, use last_online_at as start of current session
-            if discovered_at and discovered_at ~= "" then
-                if stored_duration > 0 and last_online_at and last_online_at ~= "" then
-                    -- Has offline history: stored + current session
-                    local current_session = now - tonumber(last_online_at)
-                    if current_session > 0 then
-                        online_seconds = stored_duration + current_session
-                    else
-                        online_seconds = stored_duration
-                    end
-                else
-                    -- Never went offline: calculate from discovered_at
-                    online_seconds = now - tonumber(discovered_at)
-                end
-            else
-                online_seconds = stored_duration
+        -- Auto-migrate discovered_at to first_seen for backward compat
+        if not device_session.first_seen and s.discovered_at then
+            device_session.first_seen = tonumber(s.discovered_at)
+            first_seen = tonumber(s.discovered_at)
+        end
+        
+        -- If device just came online (was offline, now online), start new session
+        if is_online and (not s.online or s.online == "0") then
+            session_start = now
+            device_session.current_session_start = now
+        end
+        
+        -- If device just went offline (was online, now offline), add session to total
+        if not is_online and s.online == "1" then
+            local session_duration = last_seen - session_start
+            if session_duration > 0 then
+                total_online = total_online + session_duration
+                device_session.total_online_time = total_online
             end
-        else
-            -- Currently offline: just show stored duration
-            online_seconds = stored_duration
+        end
+        
+        -- Update last_seen if online
+        if is_online then
+            device_session.last_seen = now
+            last_seen = now
+        end
+        
+        -- Store back to session data
+        session.devices[mac_upper] = device_session
+        
+        -- Calculate display online_seconds: total + current session (if online)
+        local online_seconds = total_online
+        if is_online then
+            online_seconds = total_online + (now - session_start)
+        end
+        if online_seconds < 0 then online_seconds = 0 end
+
+        -- Grace period: 非 LAN 设备最近在线过则暂时保持在线状态（防闪烁）
+        if not is_online and ip ~= "" and lan_prefix then
+            local device_ip_prefix = ip:match("^(%d+%.%d+%.%d+)")
+            if device_ip_prefix and device_ip_prefix ~= lan_prefix then
+                local last_seen = tonumber(device_session.last_seen) or 0
+                if last_seen > 0 and now - last_seen < 300 then
+                    is_online = true
+                end
+            end
         end
 
+        -- Determine topology tier
+        local topology_tier = "unknown"
+        local parent_node = nil
+        local mesh_connected = false
+        if wifi_stations[mac_upper] then
+            topology_tier = "direct"  -- Direct WiFi connection to this router
+        elseif mesh_info.nodes[mac_upper] then
+            topology_tier = "mesh_node"  -- This device IS a mesh node
+            mesh_connected = mesh_info.nodes[mac_upper].mesh_connected or false
+        elseif mesh_info.children[mac_upper] then
+            topology_tier = "mesh_child"  -- Device connected via mesh node
+            parent_node = mesh_info.children[mac_upper].parent_mac
+        elseif is_online then
+            topology_tier = "remote"  -- Online but not direct (via wire/other)
+        end
+
+        local rp = remote_devices[mac_upper]
+        -- Parse alt_macs string into array
+        local alt_macs = {}
+        if s.alt_macs and s.alt_macs ~= "" then
+            for alt_mac in s.alt_macs:gmatch("[^,]+") do
+                table.insert(alt_macs, alt_mac:upper())
+            end
+        end
         devices[#devices + 1] = {
             mac = s.mac,
             ip = ip,
             hostname = hostname,
-            vendor = s.vendor or "未知",
-            type = s.type or "unknown",
+            vendor = useful_vendor(s.vendor) and s.vendor or (rp and useful_vendor(rp.vendor) and rp.vendor) or "未知",
+            type = useful_type(s.type) and s.type or (rp and useful_type(rp.devtype) and rp.devtype) or "unknown",
             online = is_online,
             online_seconds = online_seconds,
             randomized = randomized,
             is_controllable = is_controllable,
+            topology = topology_tier,  -- direct | mesh_node | mesh_child | remote | unknown
+            mesh_connected = mesh_connected,  -- For mesh_node: true if connected via mesh interface
+            parent_node = parent_node,  -- For mesh_child devices, the parent mesh node MAC
             -- Only expose custom_name when user manually set it (manual=1)
             -- Auto-generated names (vendor-type) should NOT override hostname
             custom_name = (s.manual == "1" and s.name) and s.name or nil,
             blocked = (s.blocked == "1"),
             rate_limit = s.rate_limit or nil,
             group = s.group or s.groups or nil,
-            notes = s.notes or nil
+            notes = s.notes or nil,
+            alt_macs = alt_macs  -- Array of alternative MAC addresses (for rotating MAC devices)
         }
-
-        -- Merge Bandix traffic data
-        if has_bandix then
-            local bt = bandix_traffic[mac_upper]
-            if bt then
-                local d = devices[#devices]
-                d.rx_rate = bt.rx_rate
-                d.tx_rate = bt.tx_rate
-                d.rx_bytes = bt.rx_bytes
-                d.tx_bytes = bt.tx_bytes
-                d.conn_type = bt.conn_type
-                d.uplink = bt.uplink
-                -- Use Bandix limit info if our UCI has no limit
-                if not d.rate_limit and (bt.wan_rx_limit > 0 or bt.wan_tx_limit > 0) then
-                    d.rate_limit = "bandix"
-                end
-            end
-            -- Merge Bandix connection data
-            local bc = bandix_connections[mac_upper]
-            if bc then
-                local d = devices[#devices]
-                d.connections = bc
-            end
-        end
     end)
-    uci:save("devicemaster")
-    uci:commit("devicemaster")
+
+    -- Save runtime session data to RAM (tmpfs), no Flash write
+    save_session(session)
+    if probe_cache_dirty then
+        save_probe_cache(probe_cache)
+    end
 
     -- 2. Add ARP-only devices (not yet in UCI, e.g. just joined)
     for mac, ip in pairs(online_macs) do
@@ -506,7 +1541,7 @@ function api_status()
             end
         end
 
-        if not found and mac ~= "00:00:00:00:00:00" then
+        if not found and mac ~= "00:00:00:00:00:00" and not local_macs[mac] then
             local hostname = dhcp_names[mac] or ""
             local randomized = false
             local first_byte = tonumber(mac:sub(1,2), 16)
@@ -515,8 +1550,6 @@ function api_status()
             end
 
             local is_controllable = true
-            local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1")
-            local lan_prefix = lan_net and lan_net:match("^(%d+%.%d+%.%d+)") or nil
             local device_prefix = ip:match("^(%d+%.%d+%.%d+)")
             if lan_prefix and device_prefix and device_prefix ~= lan_prefix then
                 is_controllable = false
@@ -524,56 +1557,75 @@ function api_status()
 
             -- ARP-only devices: no discovered_at yet, so online_seconds = 0
             -- They will get discovered_at when event_handler.sh processes them
+            local rp = remote_devices[mac]  -- enriched from master snapshot
+            if not hostname or hostname == "" then
+                hostname = (rp and rp.hostname ~= "") and rp.hostname or ""
+            end
+            local custom_name = (rp and rp.name ~= "") and rp.name or nil
             devices[#devices + 1] = {
                 mac = mac,
                 ip = ip,
                 hostname = hostname,
-                vendor = "未知",
-                type = "unknown",
+                vendor = (rp and useful_vendor(rp.vendor)) and rp.vendor or "未知",
+                type = (rp and useful_type(rp.devtype)) and rp.devtype or "unknown",
                 online = true,
                 online_seconds = 0,
                 randomized = randomized,
                 is_controllable = is_controllable,
-                custom_name = nil,
+                custom_name = custom_name,
                 blocked = false,
                 rate_limit = nil,
                 group = nil,
                 notes = nil
             }
+        end
+    end
 
-            -- Merge Bandix data for ARP-only devices too
-            if has_bandix then
-                local bt = bandix_traffic[mac]
-                if bt then
-                    local d = devices[#devices]
-                    d.rx_rate = bt.rx_rate
-                    d.tx_rate = bt.tx_rate
-                    d.rx_bytes = bt.rx_bytes
-                    d.tx_bytes = bt.tx_bytes
-                    d.conn_type = bt.conn_type
-                    d.uplink = bt.uplink
-                end
-                local bc = bandix_connections[mac]
-                if bc then
-                    devices[#devices].connections = bc
-                end
+    -- 3. Known devices from master's UCI that are offline (not in online_macs)
+    for mac, ip in pairs(known_offline) do
+        local found = false
+        for _, d in ipairs(devices) do
+            if d.mac:upper() == mac then
+                found = true
+                break
+            end
+        end
+        if not found and mac ~= "00:00:00:00:00:00" and not local_macs[mac] then
+            local rp = remote_devices[mac]
+            local hostname = (rp and rp.hostname ~= "") and rp.hostname or (rp and rp.name ~= "") and rp.name or ""
+            local device_prefix = ip:match("^(%d+%.%d+%.%d+)")
+            -- Only show known_offline for LAN-subnet devices with a known IP
+            -- Skips: WAN-side devices, devices with no current ARP/DHCP entry
+            local is_lan_known_offline = lan_prefix and device_prefix and device_prefix == lan_prefix
+            if is_lan_known_offline then
+            devices[#devices + 1] = {
+                mac = mac,
+                ip = ip,
+                hostname = hostname,
+                vendor = (rp and useful_vendor(rp.vendor)) and rp.vendor or "未知",
+                type = (rp and useful_type(rp.devtype)) and rp.devtype or "unknown",
+                online = false,
+                online_seconds = 0,
+                randomized = false,
+                is_controllable = true,
+                custom_name = (rp and rp.name ~= "") and rp.name or nil,
+                blocked = false,
+                rate_limit = nil,
+                group = nil,
+                notes = nil
+            }
             end
         end
     end
 
     -- Sort devices by total online_seconds (descending), regardless of online status
-    -- Use MAC as secondary sort key for stable ordering
     table.sort(devices, function(a, b)
-        local a_secs = a.online_seconds or 0
-        local b_secs = b.online_seconds or 0
-        if a_secs ~= b_secs then
-            return a_secs > b_secs
-        else
-            return (a.mac or "") < (b.mac or "")
-        end
+        return (a.online_seconds or 0) > (b.online_seconds or 0)
     end)
 
-    json_response({devices = devices, bandix = has_bandix})
+    response_cache_str = json.stringify({devices = devices, _v = get_version()})
+    response_cache_time = now
+    json_response({devices = devices, _v = get_version()})
 end
 
 -- ============================================================
@@ -587,7 +1639,7 @@ local function auto_name(vendor, devtype)
         return ""
     end
     -- Shorten long vendor names
-    local short = vendor:gsub(" Mobile Communication", ""):gsub(" Corporation", ""):gsub(" Inc%.", ""):gsub(" Co%..*$", ""):gsub(" Technology", "")
+    local short = vendor:gsub(" Mobile Communication", ""):gsub(" Corporation", ""):gsub(" Inc%.", ""):gsub(" Co%..*$", ""):gsub(" Technology", ""):gsub(" ", "-")
     if not devtype or devtype == "" or devtype == "unknown" then
         return short
     end
@@ -596,14 +1648,18 @@ end
 
 -- Helper: Find a unique name by appending -2, -3, etc.
 -- Checks both UCI devicemaster and dhcp host entries
-local function unique_name(base)
+local function unique_name(base, current_mac)
     if base == "" then return "" end
 
     -- Collect all existing names from UCI and dhcp
+    -- 修复：排除当前设备，避免自己的旧名称被计入重复
     local existing = {}
     uci:foreach("devicemaster", "device", function(s)
-        if s.name and s.name ~= "" then existing[s.name:lower()] = true end
-        if s.hostname and s.hostname ~= "" and s.hostname ~= "*" then existing[s.hostname:lower()] = true end
+        -- Skip current device to avoid counting its old name as duplicate
+        if not current_mac or not s.mac or s.mac:lower() ~= current_mac:lower() then
+            if s.name and s.name ~= "" then existing[s.name:lower()] = true end
+            if s.hostname and s.hostname ~= "" and s.hostname ~= "*" then existing[s.hostname:lower()] = true end
+        end
     end)
     uci:foreach("dhcp", "host", function(s)
         if s.name and s.name ~= "" then existing[s.name:lower()] = true end
@@ -629,7 +1685,7 @@ end
 -- Helper: Sync a hostname to dnsmasq static lease
 -- Delegates to sync_hostname.sh to avoid UCI cursor index issues
 -- and heredoc problems with sys.exec()
-local function sync_to_dnsmasq(mac, name)
+local function sync_to_dnsmasq(mac, name, ip)
     if not name or name == "" then return end
     local script = "/usr/libexec/devicemaster/sync_hostname.sh"
     -- Ensure script exists
@@ -640,7 +1696,12 @@ local function sync_to_dnsmasq(mac, name)
     -- Call SYNCHRONOUSLY (no &) - we must wait for dnsmasq restart to complete
     -- Escape single quotes in name for shell safety
     local safe_name = name:gsub("'", "'\\''")
-    local result = sys.exec(script .. " '" .. mac .. "' '" .. safe_name .. "' 2>&1")
+    local safe_ip = ip or ""
+    local cmd = script .. " '" .. mac .. "' '" .. safe_name .. "'"
+    if safe_ip ~= "" then
+        cmd = cmd .. " '" .. safe_ip .. "'"
+    end
+    local result = sys.exec(cmd .. " 2>&1")
     sys.exec("logger -t devicemaster 'sync_to_dnsmasq result: " .. (result or "nil"):gsub("'", "'\\''") .. "'")
 end
 
@@ -652,8 +1713,8 @@ function api_set_name()
     local devtype = luci.http.formvalue("devtype")
     local group = luci.http.formvalue("group")
 
-    if not mac or mac == "" then
-        json_response({success = false, error = "MAC address required"})
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Invalid MAC address format"})
         return
     end
 
@@ -681,8 +1742,9 @@ function api_set_name()
     end
 
     -- Ensure name uniqueness
+    -- 修复：传入 MAC 以排除当前设备，避免自己的旧名称被计入重复
     if name and name ~= "" then
-        name = unique_name(name)
+        name = unique_name(name, mac)
     end
 
     if name ~= nil then
@@ -698,10 +1760,29 @@ function api_set_name()
         uci:set("devicemaster", section, "manual", "1")
     end
     if group ~= nil then uci:set("devicemaster", section, "group", group) end
-    uci:commit("devicemaster")
+    local ok, err = uci:commit("devicemaster")
+    if not ok then log_msg("WARN: uci commit failed: " .. tostring(err)) end
 
     -- Sync hostname to dnsmasq
-    sync_to_dnsmasq(mac, name)
+    -- 修复：获取设备 IP 并传递，避免 sync_hostname.sh 从 ARP 查找失败
+    local dev_ip = uci:get("devicemaster", section, "last_ip") or ""
+    if dev_ip == "" then
+        -- 从 DHCP leases 查找
+        local f = io.open("/tmp/dhcp.leases", "r")
+        if f then
+            for line in f:lines() do
+                local ts, lease_mac, lease_ip, hostname, clientid = line:match(
+                    "^(%d+)%s+(%S+)%s+(%S+)%s+(%S+)%s+(.*)"
+                )
+                if lease_mac and lease_mac:lower() == mac:lower() then
+                    dev_ip = lease_ip
+                    break
+                end
+            end
+            f:close()
+        end
+    end
+    sync_to_dnsmasq(mac, name, dev_ip)
 
     json_response({success = true})
 end
@@ -711,8 +1792,8 @@ function api_set_group()
     local mac = luci.http.formvalue("mac")
     local group = luci.http.formvalue("group")
 
-    if not mac or mac == "" then
-        json_response({success = false, error = "MAC address required"})
+    if not is_valid_mac(mac) then
+        json_response({success = false, error = "Invalid MAC address format"})
         return
     end
 
@@ -729,7 +1810,8 @@ function api_set_group()
     end
 
     uci:set("devicemaster", section, "group", group or "")
-    uci:commit("devicemaster")
+    local ok4, err4 = uci:commit("devicemaster")
+    if not ok4 then log_msg("WARN: uci commit failed: " .. tostring(err4)) end
     json_response({success = true})
 end
 
@@ -767,17 +1849,6 @@ function api_limit()
         json_response({success = false, error = "Invalid rate format (e.g. 1mbit, 500kbit)"})
         return
     end
-
-    -- Prefer Bandix if available
-    if is_bandix_available() then
-        local ok = bandix_set_limit(mac, rate)
-        if ok then
-            json_response({success = true, backend = "bandix"})
-            return
-        end
-        -- Fall through to own traffic_control.sh if Bandix fails
-    end
-
     local result = exec_safe("/usr/libexec/devicemaster/traffic_control.sh limit " .. mac .. " " .. rate)
     json_response({success = result == "success"})
 end
@@ -789,17 +1860,6 @@ function api_unlimit()
         json_response({success = false, error = "Valid MAC address required"})
         return
     end
-
-    -- Prefer Bandix if available
-    if is_bandix_available() then
-        local ok = bandix_remove_limit(mac)
-        if ok then
-            json_response({success = true, backend = "bandix"})
-            return
-        end
-        -- Fall through to own traffic_control.sh if Bandix fails
-    end
-
     local result = exec_safe("/usr/libexec/devicemaster/traffic_control.sh unlimit " .. mac)
     json_response({success = result == "success"})
 end
@@ -826,7 +1886,8 @@ function api_create_group()
     uci:set("devicemaster", section, "id", section)
     uci:set("devicemaster", section, "name", name or section)
     uci:set("devicemaster", section, "color", color)
-    uci:commit("devicemaster")
+    local ok5, err5 = uci:commit("devicemaster")
+    if not ok5 then log_msg("WARN: uci commit failed: " .. tostring(err5)) end
     json_response({success = true, id = section})
 end
 
@@ -838,7 +1899,8 @@ function api_delete_group()
         return
     end
     uci:delete("devicemaster", id)
-    uci:commit("devicemaster")
+    local ok6, err6 = uci:commit("devicemaster")
+    if not ok6 then log_msg("WARN: uci commit failed: " .. tostring(err6)) end
     json_response({success = true})
 end
 
@@ -867,7 +1929,8 @@ function api_delete_device()
     end)
     
     if found then
-        uci:commit("devicemaster")
+        local ok7, err7 = uci:commit("devicemaster")
+        if not ok7 then log_msg("WARN: uci commit failed: " .. tostring(err7)) end
         json_response({success = true})
     else
         json_response({success = false, error = "Device not found"})
@@ -876,25 +1939,20 @@ end
 
 -- API: Scan network (trigger ARP flood to discover new devices)
 function api_scan_network()
-    -- Only flush br-lan ARP cache (not mesh/other interfaces)
-    sys.exec("ip neigh flush dev br-lan >/dev/null 2>&1")
-
-    -- Scan br-lan subnet
-    local lan_net = sys.exec("ip route show dev br-lan 2>/dev/null | awk '{print $1}' | cut -d/ -f1"):match("^(%d+%.%d+%.%d+%)")
+    sys.exec("ip neigh flush all >/dev/null 2>&1")
+    local lan_net = sys.exec("ip -4 addr show dev br-lan 2>/dev/null | grep 'inet ' | awk '{print $2}' | cut -d/ -f1"):match("^(%d+%.%d+%.%d+)")
     if lan_net then
-        sys.exec(string.format("for i in $(seq 1 254); do ping -c 1 -W 1 %s$i >/dev/null 2>&1 & done; wait", lan_net))
-    end
-
-    -- After scan, re-ping all known UCI devices to restore their ARP entries
-    -- This prevents mesh/sub-devices from being marked offline
-    uci:foreach("devicemaster", "device", function(s)
-        local ip = s.last_ip
-        if ip and is_valid_ip(ip) then
-            sys.exec("ping -c 1 -W 1 " .. ip .. " >/dev/null 2>&1 &")
+        -- Batch ping: 32 concurrent at a time to avoid resource exhaustion
+        -- (254 simultaneous pings can overwhelm the kernel ARP table)
+        if sys.call("command -v fping >/dev/null 2>&1") == 0 then
+            sys.exec("fping -a -q " .. lan_net .. "{1..254} 2>/dev/null")
+        else
+            sys.exec(string.format(
+                "for i in $(seq 1 254); do ping -c 1 -W 1 %s$i >/dev/null 2>&1 & [ $((i %% 32)) -eq 0 ] && wait; done; wait",
+                lan_net
+            ))
         end
-    end)
-    sys.exec("wait >/dev/null 2>&1")
-
+    end
     json_response({success = true, message = "Network scan complete"})
 end
 
