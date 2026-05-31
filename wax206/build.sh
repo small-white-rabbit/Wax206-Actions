@@ -626,8 +626,13 @@ FIRMWARE_DIR="$BASE_PATH/../firmware"
 mkdir -p "$FIRMWARE_DIR"
 find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
 
-# 输出内核版本供workflow使用
-KVER=$(find "$BUILD_DIR/dl" -maxdepth 1 -name "linux-[4-6]*" -type d | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]+\.[0-9]+" | head -1)
+# 输出内核版本供workflow使用（容错处理，避免因找不到内核版本导致脚本失败）
+KVER=$(find "$BUILD_DIR/dl" -maxdepth 1 -name "linux-*" -type d 2>/dev/null | sort -r | head -n 1 | xargs basename 2>/dev/null | sed -E 's/linux-([0-9]+\.[0-9]+\.[0-9]+).*/\1/' 2>/dev/null)
+if [ -z "$KVER" ]; then
+    # 备用方案：从 .config 或编译目录获取内核版本
+    KVER=$(grep -oE "^CONFIG_LINUX_[0-9]+_?[0-9]+" "$BUILD_DIR/.config" 2>/dev/null | sed -E 's/CONFIG_LINUX_([0-9]+)_([0-9]+)/\1.\2/' | head -1)
+fi
+[ -z "$KVER" ] && KVER="Unknown"
 echo "$KVER" > "$FIRMWARE_DIR/kernel_version"
 echo "内核版本: $KVER"
 
