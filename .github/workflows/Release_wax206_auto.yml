@@ -101,7 +101,13 @@ jobs:
 
       - name: 获取内核版本
         run: |
-          echo "KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-[4-6]\.*" | sort -r | head -n 1 | grep -oE "[4-6]\.[0-9]{1,3}\.[0-9]{1,3}")" >> $GITHUB_ENV
+          # 优先从 .config 获取内核版本（最可靠）
+          KVER=$(grep -oE "^CONFIG_LINUX_[0-9]+_[0-9]+" ./action_build/.config 2>/dev/null | sed -E 's/CONFIG_LINUX_([0-9]+)_([0-9]+)/\1.\2/' | head -1)
+          # 备用：从 dl 目录获取
+          if [ -z "$KVER" ]; then
+            KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-*" -type d 2>/dev/null | sort -r | head -n 1 | xargs basename 2>/dev/null | sed -E 's/linux-([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          fi
+          echo "KVER=${KVER:-unknown}" >> $GITHUB_ENV
           cd action_build
           useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
           echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
