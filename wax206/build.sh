@@ -629,12 +629,31 @@ find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.itb" -o -name "*.manifes
 # 输出内核版本供workflow使用（容错处理，获取失败不影响编译）
 # 临时关闭严格模式，避免管道失败导致脚本退出
 set +o pipefail
-KVER=$(find "$BUILD_DIR/dl" -maxdepth 1 -name "linux-*" -type d 2>/dev/null | sort -r | head -n 1 | xargs basename 2>/dev/null | sed -E 's/linux-([0-9]+\.[0-9]+\.[0-9]+).*/\1/' 2>/dev/null) || true
-set -o pipefail
+
+# 方法1：从 dl 目录获取完整版本号（如 6.18.30）
+KVER=""
+LINUX_DIR=$(find "$BUILD_DIR/dl" -maxdepth 1 -name "linux-*" -type d 2>/dev/null | sort -r | head -n 1)
+if [ -n "$LINUX_DIR" ] && [ -f "$LINUX_DIR/Makefile" ]; then
+    # 从内核源码的 Makefile 读取完整版本
+    KVER=$(grep -E "^VERSION =|^PATCHLEVEL =|^SUBLEVEL =" "$LINUX_DIR/Makefile" 2>/dev/null | awk '{print $3}' | tr '\n' '.' | sed 's/\.$//')
+fi
+
+# 方法2：从 dl 目录名提取（支持 6.18.30 或 6.18 格式）
+if [ -z "$KVER" ] && [ -n "$LINUX_DIR" ]; then
+    KVER=$(basename "$LINUX_DIR" 2>/dev/null | sed -E 's/linux-([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
+fi
+
+# 方法3：从 include/kernel-version.mk 获取（OpenWrt 官方方式）
+if [ -z "$KVER" ] && [ -f "$BUILD_DIR/include/kernel-version.mk" ]; then
+    KVER=$(grep -E "^LINUX_VERSION-" "$BUILD_DIR/include/kernel-version.mk" 2>/dev/null | tail -1 | sed -E 's/.*= *([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
+fi
+
+# 方法4：从 .config 获取基础版本（无补丁号）
 if [ -z "$KVER" ]; then
-    # 备用方案：从 .config 获取内核版本
     KVER=$(grep -oE "^CONFIG_LINUX_[0-9]+_[0-9]+" "$BUILD_DIR/.config" 2>/dev/null | sed -E 's/CONFIG_LINUX_([0-9]+)_([0-9]+)/\1.\2/' | head -1) || true
 fi
+
+set -o pipefail
 [ -z "$KVER" ] && KVER="Unknown"
 echo "$KVER" > "$FIRMWARE_DIR/kernel_version"
 echo "内核版本: $KVER"
