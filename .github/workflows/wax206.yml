@@ -141,15 +141,20 @@ jobs:
         if [ -n "$MANIFEST_FILE" ]; then
           KVER=$(grep "^kernel - " "$MANIFEST_FILE" 2>/dev/null | head -1 | sed -E 's/kernel - ([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
         fi
-        echo "KVER=${KVER:-unknown}" >> $GITHUB_ENV
-        # 获取源码信息
-        useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
+        if [ -z "$KVER" ]; then
+          echo "::warning::未能获取到内核版本，使用默认值"
+          KVER="unknown"
+        fi
+        echo "KVER=${KVER}" >> $GITHUB_ENV
+        # 获取源码信息（失败使用默认值）
+        useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H" 2>/dev/null || echo "Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown")
         echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
         # 获取源码URL
         echo "BUILD_SRC=$REPO_URL" >> $GITHUB_ENV
         # 设置构建日期
         echo "BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
         echo "status=success" >> $GITHUB_OUTPUT
+      continue-on-error: true
 
     # ===== 删除不需要的固件文件 =====
     - name: Clean Unnecessary Files

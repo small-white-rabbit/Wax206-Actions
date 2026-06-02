@@ -108,11 +108,22 @@ jobs:
           if [ -n "$MANIFEST_FILE" ]; then
             KVER=$(grep "^kernel - " "$MANIFEST_FILE" 2>/dev/null | head -1 | sed -E 's/kernel - ([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
           fi
-          echo "KVER=${KVER:-unknown}" >> $GITHUB_ENV
-          cd action_build
-          useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
-          echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
-          cd ..
+          if [ -z "$KVER" ]; then
+            echo "::warning::未能获取到内核版本，使用默认值"
+            KVER="unknown"
+          fi
+          echo "KVER=${KVER}" >> $GITHUB_ENV
+          # 获取源码信息（失败不影响后续步骤）
+          if [ -d "action_build" ]; then
+            cd action_build
+            useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H" 2>/dev/null || echo "Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown")
+            echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
+            cd ..
+          else
+            echo "::warning::源码目录不存在"
+            echo "useVersionInfo=Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown" >> $GITHUB_ENV
+          fi
+        continue-on-error: true
           
       - name: 删除旧缓存
         run: |

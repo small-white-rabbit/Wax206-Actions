@@ -115,15 +115,23 @@ jobs:
           fi
           
           if [ "$KVER" = "Unknown" ] || [ -z "$KVER" ]; then
-            echo "::warning::未能获取到内核版本"
+            echo "::warning::未能获取到内核版本，使用默认值"
+            KVER="Unknown"
           fi
           
           echo "KVER=$KVER" >> $GITHUB_ENV
           
-          cd ${{ inputs.model || 'wax206' }}
-          useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
-          echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
-          cd ..
+          # 获取源码信息（失败不影响后续步骤）
+          if [ -d "${{ inputs.model || 'wax206' }}" ]; then
+            cd ${{ inputs.model || 'wax206' }}
+            useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H" 2>/dev/null || echo "Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown")
+            echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
+            cd ..
+          else
+            echo "::warning::源码目录不存在"
+            echo "useVersionInfo=Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown" >> $GITHUB_ENV
+          fi
+        continue-on-error: true
 
       - name: 删除旧缓存
         run: |
