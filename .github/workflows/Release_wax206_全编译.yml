@@ -121,11 +121,12 @@ jobs:
       - name: 获取内核版本
         id: get_kver
         run: |
-          # 优先从 .config 获取内核版本（最可靠）
-          KVER=$(grep -oE "^CONFIG_LINUX_[0-9]+_[0-9]+" ./action_build/.config 2>/dev/null | sed -E 's/CONFIG_LINUX_([0-9]+)_([0-9]+)/\1.\2/' | head -1)
-          # 备用：从 dl 目录获取
-          if [ -z "$KVER" ]; then
-            KVER=$(find ./action_build/dl -maxdepth 1 -name "linux-*" -type d 2>/dev/null | sort -r | head -n 1 | xargs basename 2>/dev/null | sed -E 's/linux-([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          KVER="unknown"
+          # 从 manifest 文件读取内核版本
+          # manifest 文件格式: kernel - 6.18.33~12916f99c2c7a3cc8b861be165060899-r1
+          MANIFEST_FILE=$(find ./firmware -name "*.manifest" -type f 2>/dev/null | head -1)
+          if [ -n "$MANIFEST_FILE" ]; then
+            KVER=$(grep "^kernel - " "$MANIFEST_FILE" 2>/dev/null | head -1 | sed -E 's/kernel - ([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
           fi
           echo "KVER=${KVER:-unknown}" >> $GITHUB_ENV
           echo "kver=${KVER:-unknown}" >> $GITHUB_OUTPUT
