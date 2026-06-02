@@ -101,12 +101,24 @@ jobs:
           # 方法2: 从 manifest 文件读取 (备用方案)
           # manifest 文件格式: kernel - 6.18.33~12916f99c2c7a3cc8b861be165060899-r1
           if [ "$KVER" = "Unknown" ] || [ -z "$KVER" ]; then
+            echo "尝试从 manifest 文件获取内核版本..."
+            # 查找所有 manifest 文件 (包括 Packages.manifest 等)
             MANIFEST_FILE=$(find ./firmware -name "*.manifest" -type f 2>/dev/null | head -1)
             if [ -n "$MANIFEST_FILE" ]; then
-              KVER=$(grep "^kernel - " "$MANIFEST_FILE" 2>/dev/null | sed -E 's/kernel - ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+              echo "找到 manifest 文件: $MANIFEST_FILE"
+              # 显示文件内容的前几行用于调试
+              echo "manifest 文件内容预览:"
+              head -5 "$MANIFEST_FILE" 2>/dev/null || echo "无法读取文件"
+              # 提取内核版本
+              KVER=$(grep "^kernel - " "$MANIFEST_FILE" 2>/dev/null | head -1 | sed -E 's/kernel - ([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
               if [ -n "$KVER" ]; then
                 echo "从 manifest 文件获取到内核版本: $KVER"
+              else
+                echo "在 manifest 文件中未找到 kernel 行"
               fi
+            else
+              echo "未找到任何 manifest 文件"
+              ls -la ./firmware/ 2>/dev/null || echo "firmware 目录不存在"
             fi
           fi
           
