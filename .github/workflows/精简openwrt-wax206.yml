@@ -90,12 +90,43 @@ jobs:
 
       - name: 获取内核版本
         run: |
+          KVER="Unknown"
+          
+          # 方法1: 从 kernel_version 文件读取
           if [ -f "./firmware/kernel_version" ]; then
-            echo "KVER=$(cat ./firmware/kernel_version)" >> $GITHUB_ENV
-          else
-            echo "KVER=Unknown" >> $GITHUB_ENV
-            echo "::warning::未找到内核版本文件"
+            KVER=$(cat ./firmware/kernel_version)
+            echo "从 kernel_version 文件获取到内核版本: $KVER"
           fi
+          
+          # 方法2: 从 manifest 文件读取 (备用方案)
+          # manifest 文件格式: kernel - 6.18.33~12916f99c2c7a3cc8b861be165060899-r1
+          if [ "$KVER" = "Unknown" ] || [ -z "$KVER" ]; then
+            MANIFEST_FILE=$(find ./firmware -name "*.manifest" -type f 2>/dev/null | head -1)
+            if [ -n "$MANIFEST_FILE" ]; then
+              KVER=$(grep "^kernel - " "$MANIFEST_FILE" 2>/dev/null | sed -E 's/kernel - ([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+              if [ -n "$KVER" ]; then
+                echo "从 manifest 文件获取到内核版本: $KVER"
+              fi
+            fi
+          fi
+          
+          # 方法3: 从 openwrt 构建目录获取
+          if [ "$KVER" = "Unknown" ] || [ -z "$KVER" ]; then
+            BUILD_DIR="./${{ inputs.model || 'wax206' }}"
+            if [ -f "$BUILD_DIR/include/kernel-version.mk" ]; then
+              KVER=$(grep -E "^LINUX_VERSION-" "$BUILD_DIR/include/kernel-version.mk" 2>/dev/null | tail -1 | sed -E 's/.*= *([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
+              if [ -n "$KVER" ]; then
+                echo "从 kernel-version.mk 获取到内核版本: $KVER"
+              fi
+            fi
+          fi
+          
+          if [ "$KVER" = "Unknown" ] || [ -z "$KVER" ]; then
+            echo "::warning::未能获取到内核版本"
+          fi
+          
+          echo "KVER=$KVER" >> $GITHUB_ENV
+          
           cd ${{ inputs.model || 'wax206' }}
           useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H")
           echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
