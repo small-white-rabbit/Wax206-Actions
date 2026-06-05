@@ -221,30 +221,92 @@ update_feeds() {
         touch "$BUILD_DIR/include/bpf.mk"
     fi
 
-    ./scripts/feeds update -a
+    # 选择性更新 feeds，避免扫描有问题的第三方源的所有包
+    # 问题：kenzok 和 bandix 源中部分包的 Makefile 格式有问题
+    # 解决：只更新官方源和已知正常的自定义源，第三方源单独处理
+    
+    # 更新官方 feeds（这些源的 Makefile 格式正常）
+    ./scripts/feeds update base packages luci routing telephony
+    
+    # 更新 OpenClash 和 Passwall（这些源格式正常）
+    for feed in openclash passwall; do
+        ./scripts/feeds update "$feed" 2>/dev/null || echo "Warning: $feed update failed"
+    done
+    
+    # 对于有问题的第三方源，只克隆但不扫描所有包
+    # 后续在 install_feeds 中选择性安装需要的包
+    for feed in kenzok openwrt_bandix luci_app_bandix; do
+        if [ ! -d "$BUILD_DIR/feeds/$feed" ]; then
+            echo "克隆 $feed 源（跳过 Makefile 扫描）..."
+            # 手动克隆，不通过 feeds update
+            mkdir -p "$BUILD_DIR/feeds/$feed"
+            case "$feed" in
+                kenzok)
+                    git clone --depth 1 https://github.com/kenzok8/openwrt-packages.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
+                openwrt_bandix)
+                    git clone --depth 1 https://github.com/timsaya/openwrt-bandix.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
+                luci_app_bandix)
+                    git clone --depth 1 https://github.com/timsaya/luci-app-bandix.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
+            esac
+        fi
+    done
+    
     cd - > /dev/null
 }
 
 install_feeds() {
     cd "$BUILD_DIR"
     ./scripts/feeds update -i
-    for dir in "$BUILD_DIR"/feeds/*; do
-        if [ -d "$dir" ] && [[ ! "$dir" == *.tmp ]] && [[ ! "$dir" == *.index ]] && [[ ! "$dir" == *.targetindex ]]; then
-            local feed_name
-            feed_name=$(basename "$dir")
-            if [[ "$feed_name" == "openclash" ]]; then
-                install_openclash
-            elif [[ "$feed_name" == "passwall" ]]; then
-                install_passwall
-            elif [[ "$feed_name" == "kenzok" ]]; then
-                # kenzok 源选择性安装需要的包，避免与官方源冲突
-                echo "选择性安装 kenzok 源中的包..."
-                ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
-            else
-                ./scripts/feeds install -f -ap "$feed_name"
-            fi
+    
+    # 安装官方 feeds
+    for feed in base packages luci routing telephony; do
+        if [ -d "$BUILD_DIR/feeds/$feed" ]; then
+            ./scripts/feeds install -f -ap "$feed" || echo "Warning: $feed install failed"
         fi
     done
+    
+    # 安装 OpenClash
+    if [ -d "$BUILD_DIR/feeds/openclash" ]; then
+        install_openclash || echo "Warning: OpenClash install failed"
+    fi
+    
+    # 安装 Passwall
+    if [ -d "$BUILD_DIR/feeds/passwall" ]; then
+        install_passwall || echo "Warning: Passwall install failed"
+    fi
+    
+    # 对于有问题的第三方源，手动复制需要的包到 package 目录
+    # 这样可以绕过 feeds install 的 Makefile 扫描
+    
+    # kenzok 源：只复制 argon 主题相关包
+    if [ -d "$BUILD_DIR/feeds/kenzok" ]; then
+        echo "手动安装 kenzok 源中的 argon 主题..."
+        for pkg in luci-theme-argon luci-app-argon-config; do
+            if [ -d "$BUILD_DIR/feeds/kenzok/$pkg" ]; then
+                cp -r "$BUILD_DIR/feeds/kenzok/$pkg" "$BUILD_DIR/package/" 2>/dev/null || true
+                echo "已复制: $pkg"
+            fi
+        done
+    fi
+    
+    # bandix 源：复制需要的包
+    if [ -d "$BUILD_DIR/feeds/openwrt_bandix" ]; then
+        echo "手动安装 openwrt_bandix 源..."
+        # 列出需要的包并复制
+        for pkg in bandix; do
+            if [ -d "$BUILD_DIR/feeds/openwrt_bandix/$pkg" ]; then
+                cp -r "$BUILD_DIR/feeds/openwrt_bandix/$pkg" "$BUILD_DIR/package/" 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    if [ -d "$BUILD_DIR/feeds/luci_app_bandix" ]; then
+        echo "手动安装 luci_app_bandix 源..."
+        if [ -d "$BUILD_DIR/feeds/luci_app_bandix/luci-app-bandix" ]; then
+            cp -r "$BUILD_DIR/feeds/luci_app_bandix/luci-app-bandix" "$BUILD_DIR/package/" 2>/dev/null || true
+        fi
+    fi
+    
     cd - > /dev/null
 }
 
