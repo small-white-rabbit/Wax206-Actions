@@ -290,12 +290,14 @@ install_feeds() {
     fi
     
     # bandix 源：复制需要的包
+    # 注意：仓库目录名是 openwrt-bandix，但包目录名也是 openwrt-bandix
     if [ -d "$BUILD_DIR/feeds/openwrt_bandix" ]; then
         echo "手动安装 openwrt_bandix 源..."
-        # 列出需要的包并复制
-        for pkg in bandix; do
+        # 修复：包目录名是 openwrt-bandix，不是 bandix
+        for pkg in openwrt-bandix bandix; do
             if [ -d "$BUILD_DIR/feeds/openwrt_bandix/$pkg" ]; then
                 cp -r "$BUILD_DIR/feeds/openwrt_bandix/$pkg" "$BUILD_DIR/package/" 2>/dev/null || true
+                echo "已复制: $pkg"
             fi
         done
     fi
