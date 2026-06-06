@@ -102,9 +102,20 @@ clone_source() {
     echo "$REPO_URL $REPO_BRANCH"
     echo "$REPO_URL/$REPO_BRANCH" >"$BASE_PATH/../repo_flag"
 
-    if [[ -d "$BASE_PATH/../action_build" ]]; then
-        echo "action_build already exists, skipping clone"
+    # 检查是否存在有效的 git 仓库（必须有 .git 目录）
+    if [[ -d "$BASE_PATH/../action_build/.git" ]]; then
+        echo "action_build 已存在有效的 git 仓库，跳过克隆"
     else
+        # 目录存在但没有 .git（可能是缓存恢复的 staging_dir），需要重新克隆
+        if [[ -d "$BASE_PATH/../action_build" ]]; then
+            echo "action_build 目录存在但缺少 .git，清理后重新克隆"
+            # 保留缓存目录，删除其他内容
+            cd "$BASE_PATH/../action_build"
+            # 只保留 staging_dir 和 .ccache（如果存在）
+            find . -maxdepth 1 -not -name '.' -not -name 'staging_dir' -not -name '.ccache' -exec rm -rf {} + 2>/dev/null || true
+            cd - > /dev/null
+        fi
+        
         if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BASE_PATH/../action_build"; then
             echo "错误：克隆仓库 $REPO_URL 失败" >&2
             exit 1
