@@ -169,14 +169,15 @@ reset_feeds_conf() {
     cd - > /dev/null
 }
 
-# ==================== Feeds 管理（并行更新） ====================
+# ==================== Feeds 管理 ====================
 update_feeds() {
     cd "$BUILD_DIR"
     local FEEDS_PATH="$BUILD_DIR/feeds.conf.default"
     [[ -f "$BUILD_DIR/feeds.conf" ]] && FEEDS_PATH="$BUILD_DIR/feeds.conf"
     
-    sed -i '/^#/d' "$FEEDS_PATH"
-    sed -i '/packages_ext/d' "$FEEDS_PATH"
+    # 不要删除注释行！OpenWrt 的 feeds.conf.default 中注释行是有效格式
+    # 只删除 packages_ext 相关行（如果存在）
+    sed -i '/packages_ext/d' "$FEEDS_PATH" 2>/dev/null || true
     
     # 从配置文件读取 feeds 源
     if [[ -f "$FEEDS_CONF" ]]; then
@@ -193,8 +194,11 @@ update_feeds() {
                 echo "特殊源: $feed_name (将手动克隆)"
             else
                 if ! grep -q "$feed_name" "$FEEDS_PATH"; then
+                    # 确保文件末尾有换行符
                     [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
+                    # 添加新源，格式：src-git 名称 URL
                     echo "src-git $feed_name $feed_url" >>"$FEEDS_PATH"
+                    echo "✓ 已添加 feed: $feed_name"
                 fi
             fi
         done < "$FEEDS_CONF"
