@@ -19,6 +19,8 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   WAX206_DIR: wax206
   DIY_SH: wax206/diy-part2.sh
+  # 强制使用 Node.js 24，避免 Node.js 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -36,7 +38,7 @@ jobs:
       - name: 构建系统设置
         run: |
           sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-          sudo -E apt -yqq install dos2unix libfuse-dev
+          sudo -E apt -yqq install dos2unix libfuse-dev ccache  # 新增: 安装 ccache
           sudo -E apt -yqq autoremove --purge
           sudo -E apt -yqq autoclean
           sudo -E apt -yqq clean
@@ -69,18 +71,23 @@ jobs:
         uses: actions/cache@v5.0.2
         with:
           path: |
-            ./${{ inputs.model || 'wax206' }}/.ccache
-            ./${{ inputs.model || 'wax206' }}/staging_dir
+            ./action_build/.ccache
+            ./action_build/staging_dir
           key: ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-${{ env.BUILD_DATE }}
           restore-keys: |
             ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-
 
       - name: 刷新缓存
         run: |
-          if [ -d "./${{ inputs.model || 'wax206' }}/staging_dir" ]; then
-            echo "清理 staging_dir 中的 stamp 文件，避免缓存状态不一致..."
-            find "./${{ inputs.model || 'wax206' }}/staging_dir" -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
-            echo "stamp 文件清理完成"
+          if [ -d "./action_build/staging_dir" ]; then
+            echo "刷新 staging_dir 中的 stamp 文件时间戳..."
+            # 使用 touch 刷新时间戳，保持缓存有效性（关键优化！）
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+              find "$dir" -type f -exec touch {} +
+            done
+            echo "stamp 文件时间戳刷新完成"
+          else
+            echo "staging_dir 目录不存在，跳过缓存刷新"
           fi
 
       - name: 构建固件
@@ -121,14 +128,14 @@ jobs:
           
           echo "KVER=$KVER" >> $GITHUB_ENV
           
-          # 获取源码信息（失败不影响后续步骤）
-          if [ -d "${{ inputs.model || 'wax206' }}" ]; then
-            cd ${{ inputs.model || 'wax206' }}
+          # 获取源码信息（从 action_build 目录）
+          if [ -d "action_build" ]; then
+            cd action_build
             useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H" 2>/dev/null || echo "Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown")
             echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
             cd ..
           else
-            echo "::warning::源码目录不存在"
+            echo "::warning::源码目录 action_build 不存在"
             echo "useVersionInfo=Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown" >> $GITHUB_ENV
           fi
         continue-on-error: true
