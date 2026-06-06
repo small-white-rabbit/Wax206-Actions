@@ -166,11 +166,19 @@ clean_up() {
 
 reset_feeds_conf() {
     cd "$BUILD_DIR"
+    # 确保远程仓库正确指向 OpenWrt 源码仓库
+    # GitHub Actions 环境可能会覆盖 origin
+    local current_origin=$(git remote get-url origin 2>/dev/null || echo "")
+    if [[ "$current_origin" != "$REPO_URL" ]]; then
+        echo "修正 origin 远程仓库: $current_origin -> $REPO_URL"
+        git remote set-url origin "$REPO_URL" 2>/dev/null || git remote add origin "$REPO_URL"
+    fi
     # 浅克隆(--depth 1)不会创建远程分支引用(如 origin/main)
     # 先 fetch 建立 origin/$REPO_BRANCH 引用，再 reset
-    git fetch origin "$REPO_BRANCH"
+    git fetch origin "$REPO_BRANCH" --depth 1
     git reset --hard "origin/$REPO_BRANCH"
-    git clean -f -d
+    # 使用 -e 排除缓存目录，避免删除 staging_dir 和 .ccache
+    git clean -f -d -e staging_dir -e .ccache -e tmp
     if [[ "$COMMIT_HASH" != "none" ]]; then
         git checkout "$COMMIT_HASH"
     fi
