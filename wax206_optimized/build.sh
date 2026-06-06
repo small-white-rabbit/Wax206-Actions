@@ -175,12 +175,14 @@ update_feeds() {
     local FEEDS_PATH="$BUILD_DIR/feeds.conf.default"
     [[ -f "$BUILD_DIR/feeds.conf" ]] && FEEDS_PATH="$BUILD_DIR/feeds.conf"
     
-    # 不要删除注释行！OpenWrt 的 feeds.conf.default 中注释行是有效格式
-    # 只删除 packages_ext 相关行（如果存在）
-    sed -i '/packages_ext/d' "$FEEDS_PATH" 2>/dev/null || true
+    # 显示当前 feeds.conf.default 内容（调试）
+    echo "=== 当前 feeds.conf.default 内容 ==="
+    cat "$FEEDS_PATH"
+    echo "=== feeds.conf.default 内容结束 ==="
     
-    # 从配置文件读取 feeds 源
+    # 从配置文件读取 feeds 源（只添加第三方源）
     if [[ -f "$FEEDS_CONF" ]]; then
+        echo "=== 添加第三方 feeds ==="
         while IFS= read -r line; do
             # 跳过注释行和空行
             [[ "$line" =~ ^[[:space:]]*# ]] && continue
@@ -193,43 +195,53 @@ update_feeds() {
             # 跳过特殊标记行（KENZOK_PACKAGES 等）
             [[ "$feed_name" =~ ^KENZOK|^BANDIX|^LUCI ]] && continue
             
-            # 以 ! 开头的源需要特殊处理
+            # 以 ! 开头的源需要特殊处理（手动克隆，不添加到 feeds.conf）
             if [[ "$feed_name" =~ ^! ]]; then
                 feed_name="${feed_name#!}"
-                echo "特殊源: $feed_name (将手动克隆)"
+                echo "特殊源: $feed_name (将手动克隆，不添加到 feeds.conf)"
+                continue
+            fi
+            
+            # 检查是否已存在
+            if ! grep -q "^src-git.*${feed_name}" "$FEEDS_PATH" 2>/dev/null; then
+                # 确保文件末尾有换行符
+                [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
+                # 添加新源，格式：src-git 名称 URL（去掉分支信息，使用默认分支）
+                local feed_url="${feed_url_branch%%;*}"
+                echo "src-git ${feed_name} ${feed_url}" >>"$FEEDS_PATH"
+                echo "✓ 已添加 feed: ${feed_name} -> ${feed_url}"
             else
-                # 检查是否已存在
-                if ! grep -q "src-git.*${feed_name}" "$FEEDS_PATH" 2>/dev/null; then
-                    # 确保文件末尾有换行符
-                    [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-                    # 添加新源，格式：src-git 名称 URL;分支
-                    # 如果 URL 已经包含分支信息，直接使用；否则使用默认格式
-                    if [[ "$feed_url_branch" =~ ; ]]; then
-                        echo "src-git ${feed_name} ${feed_url_branch}" >>"$FEEDS_PATH"
-                    else
-                        echo "src-git ${feed_name} ${feed_url_branch}" >>"$FEEDS_PATH"
-                    fi
-                    echo "✓ 已添加 feed: ${feed_name}"
-                fi
+                echo "✓ feed ${feed_name} 已存在，跳过"
             fi
         done < "$FEEDS_CONF"
     fi
     
+    # 显示修改后的 feeds.conf.default 内容（调试）
+    echo "=== 修改后 feeds.conf.default 内容 ==="
+    cat "$FEEDS_PATH"
+    echo "=== feeds.conf.default 内容结束 ==="
+    
     [[ ! -f "$BUILD_DIR/include/bpf.mk" ]] && touch "$BUILD_DIR/include/bpf.mk"
     
-    # 更新官方 feeds（只更新 feeds.conf.default 中存在的 feeds）
-    echo "更新官方 feeds..."
-    ./scripts/feeds update packages luci routing telephony video
+    # 更新所有 feeds（使用 -a 更新所有已定义的 feeds）
+    echo "=== 更新所有 feeds ==="
+    ./scripts/feeds update -a
     
-    # 更新第三方正常源
-    for feed in openclash passwall; do
-        ./scripts/feeds update "$feed" 2>/dev/null || echo "Warning: $feed update failed"
-    done
+    cd - > /dev/null
+}
+
+# ==================== 安装 Feeds ====================
+install_feeds() {
+    cd "$BUILD_DIR"
     
-    # 手动克隆特殊源
+    # 手动克隆特殊源（在 feeds update 之前）
+    echo "=== 手动克隆特殊源 ==="
     for feed in kenzok openwrt_bandix luci_app_bandix; do
-        [[ -d "$BUILD_DIR/feeds/$feed" ]] && continue
-        echo "手动克隆 $feed..."
+        if [[ -d "$BUILD_DIR/feeds/$feed" ]]; then
+            echo "✓ $feed 已存在，跳过克隆"
+            continue
+        fi
+        echo "克隆 $feed..."
         mkdir -p "$BUILD_DIR/feeds/$feed"
         case "$feed" in
             kenzok) git clone --depth 1 https://github.com/kenzok8/openwrt-packages.git "$BUILD_DIR/feeds/$feed" ;;
@@ -237,16 +249,13 @@ update_feeds() {
             luci_app_bandix) git clone --depth 1 https://github.com/timsaya/luci-app-bandix.git "$BUILD_DIR/feeds/$feed" ;;
         esac
     done
-    cd - > /dev/null
-}
-
-# ==================== 安装 Feeds ====================
-install_feeds() {
-    cd "$BUILD_DIR"
-    ./scripts/feeds update -i
     
-    # 安装官方 feeds
-    for feed in base packages luci routing telephony; do
+    # 安装所有 feeds
+    echo "=== 安装所有 feeds ==="
+    ./scripts/feeds install -a
+    
+    # 安装官方 feeds（确保所有包都安装）
+    for feed in packages luci routing telephony video; do
         [[ -d "$BUILD_DIR/feeds/$feed" ]] && ./scripts/feeds install -f -ap "$feed"
     done
     
