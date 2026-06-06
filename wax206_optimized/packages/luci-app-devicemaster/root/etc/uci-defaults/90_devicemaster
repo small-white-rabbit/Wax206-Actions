@@ -1,0 +1,75 @@
+#!/bin/sh
+# UCI defaults for DeviceMaster
+# This script runs once after package installation
+
+# Create default config if not exists
+[ ! -f /etc/config/devicemaster ] && {
+    touch /etc/config/devicemaster
+    
+    uci add devicemaster global
+    uci set devicemaster.@global[0].enabled='1'
+    uci set devicemaster.@global[0].auto_detect='1'
+    uci set devicemaster.@global[0].oui_lookup='1'
+    uci set devicemaster.@global[0].traffic_monitor='1'
+    uci set devicemaster.@global[0].refresh_interval='5'
+    uci set devicemaster.@global[0].history_days='30'
+    
+    # Create default groups
+    uci add devicemaster group
+    uci set devicemaster.@group[-1].id='phones'
+    uci set devicemaster.@group[-1].name='手机'
+    uci set devicemaster.@group[-1].icon='📱'
+    uci set devicemaster.@group[-1].color='#3498db'
+    
+    uci add devicemaster group
+    uci set devicemaster.@group[-1].id='computers'
+    uci set devicemaster.@group[-1].name='电脑'
+    uci set devicemaster.@group[-1].icon='💻'
+    uci set devicemaster.@group[-1].color='#2ecc71'
+    
+    uci add devicemaster group
+    uci set devicemaster.@group[-1].id='iot'
+    uci set devicemaster.@group[-1].name='智能家居'
+    uci set devicemaster.@group[-1].icon='🏠'
+    uci set devicemaster.@group[-1].color='#9b59b6'
+    
+    uci add devicemaster group
+    uci set devicemaster.@group[-1].id='network'
+    uci set devicemaster.@group[-1].name='网络设备'
+    uci set devicemaster.@group[-1].icon='🌐'
+    uci set devicemaster.@group[-1].color='#e74c3c'
+    
+    # Create OUI settings section
+    uci set devicemaster.settings=settings
+    uci set devicemaster.settings.oui_mode='remote'
+    uci set devicemaster.settings.remote_api='maclookup'
+
+    uci commit devicemaster
+}
+
+# Cleanup: remove duplicate anonymous settings sections (keep only named 'settings')
+# This fixes issues where both @settings[0] and settings existed
+settings_count=$(uci show devicemaster | grep -c '^devicemaster\.@settings\[' 2>/dev/null)
+if [ "$settings_count" -gt 0 ]; then
+    # Delete all anonymous settings sections
+    while uci -q get devicemaster.@settings[0] >/dev/null 2>&1; do
+        uci delete devicemaster.@settings[0]
+    done
+    # Ensure named settings section exists
+    if ! uci -q get devicemaster.settings >/dev/null 2>&1; then
+        uci set devicemaster.settings=settings
+        uci set devicemaster.settings.oui_mode='remote'
+        uci set devicemaster.settings.remote_api='maclookup'
+    fi
+    uci commit devicemaster
+fi
+
+# Make scripts executable
+chmod +x /usr/libexec/devicemaster/*.sh 2>/dev/null
+chmod +x /usr/libexec/devicemaster/devicemasterd 2>/dev/null
+chmod +x /etc/init.d/devicemaster 2>/dev/null
+
+# Enable the service
+/etc/init.d/devicemaster enable 2>/dev/null
+
+exit 0
