@@ -182,23 +182,34 @@ update_feeds() {
     # 从配置文件读取 feeds 源
     if [[ -f "$FEEDS_CONF" ]]; then
         while IFS= read -r line; do
-            [[ "$line" =~ ^# ]] && continue
-            [[ -z "$line" ]] && continue
+            # 跳过注释行和空行
+            [[ "$line" =~ ^[[:space:]]*# ]] && continue
+            [[ -z "${line// }" ]] && continue
             
+            # 解析配置行：名称 URL;分支
             local feed_name=$(echo "$line" | awk '{print $1}')
-            local feed_url=$(echo "$line" | awk '{print $2}')
+            local feed_url_branch=$(echo "$line" | awk '{print $2}')
+            
+            # 跳过特殊标记行（KENZOK_PACKAGES 等）
+            [[ "$feed_name" =~ ^KENZOK|^BANDIX|^LUCI ]] && continue
             
             # 以 ! 开头的源需要特殊处理
             if [[ "$feed_name" =~ ^! ]]; then
                 feed_name="${feed_name#!}"
                 echo "特殊源: $feed_name (将手动克隆)"
             else
-                if ! grep -q "$feed_name" "$FEEDS_PATH"; then
+                # 检查是否已存在
+                if ! grep -q "src-git.*${feed_name}" "$FEEDS_PATH" 2>/dev/null; then
                     # 确保文件末尾有换行符
                     [ -z "$(tail -c 1 "$FEEDS_PATH")" ] || echo "" >>"$FEEDS_PATH"
-                    # 添加新源，格式：src-git 名称 URL
-                    echo "src-git $feed_name $feed_url" >>"$FEEDS_PATH"
-                    echo "✓ 已添加 feed: $feed_name"
+                    # 添加新源，格式：src-git 名称 URL;分支
+                    # 如果 URL 已经包含分支信息，直接使用；否则使用默认格式
+                    if [[ "$feed_url_branch" =~ ; ]]; then
+                        echo "src-git ${feed_name} ${feed_url_branch}" >>"$FEEDS_PATH"
+                    else
+                        echo "src-git ${feed_name} ${feed_url_branch}" >>"$FEEDS_PATH"
+                    fi
+                    echo "✓ 已添加 feed: ${feed_name}"
                 fi
             fi
         done < "$FEEDS_CONF"
