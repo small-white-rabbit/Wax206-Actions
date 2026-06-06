@@ -108,18 +108,32 @@ clone_source() {
     else
         # 目录存在但没有 .git（可能是缓存恢复的 staging_dir），需要重新克隆
         if [[ -d "$BASE_PATH/../action_build" ]]; then
-            echo "action_build 目录存在但缺少 .git，清理后重新克隆"
-            # 保留缓存目录，删除其他内容
-            cd "$BASE_PATH/../action_build"
-            # 只保留 staging_dir 和 .ccache（如果存在）
-            find . -maxdepth 1 -not -name '.' -not -name 'staging_dir' -not -name '.ccache' -exec rm -rf {} + 2>/dev/null || true
-            cd - > /dev/null
+            echo "action_build 目录存在但缺少 .git，保留缓存后重新克隆"
+            # 将缓存目录移动到临时位置
+            mkdir -p "$BASE_PATH/../cache_temp"
+            if [[ -d "$BASE_PATH/../action_build/staging_dir" ]]; then
+                mv "$BASE_PATH/../action_build/staging_dir" "$BASE_PATH/../cache_temp/"
+            fi
+            if [[ -d "$BASE_PATH/../action_build/.ccache" ]]; then
+                mv "$BASE_PATH/../action_build/.ccache" "$BASE_PATH/../cache_temp/"
+            fi
+            # 清空 action_build 目录
+            rm -rf "$BASE_PATH/../action_build"
         fi
         
         if ! git clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BASE_PATH/../action_build"; then
             echo "错误：克隆仓库 $REPO_URL 失败" >&2
             exit 1
         fi
+
+        # 恢复缓存目录
+        if [[ -d "$BASE_PATH/../cache_temp/staging_dir" ]]; then
+            mv "$BASE_PATH/../cache_temp/staging_dir" "$BASE_PATH/../action_build/"
+        fi
+        if [[ -d "$BASE_PATH/../cache_temp/.ccache" ]]; then
+            mv "$BASE_PATH/../cache_temp/.ccache" "$BASE_PATH/../action_build/"
+        fi
+        rm -rf "$BASE_PATH/../cache_temp"
 
         # 移除国内下载源
         local mirrors_file="$BASE_PATH/../action_build/scripts/projectsmirrors.json"
