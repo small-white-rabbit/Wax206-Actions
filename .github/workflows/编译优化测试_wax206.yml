@@ -19,6 +19,8 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   WAX206_DIR: wax206
   DIY_SH: wax206/diy-part2.sh
+  # 强制使用 Node.js 24，避免 Node.js 20 弃用警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
@@ -124,14 +126,14 @@ jobs:
           
           echo "KVER=$KVER" >> $GITHUB_ENV
           
-          # 获取源码信息
-          if [ -d "${{ inputs.model || 'gwax206' }}" ]; then
-            cd ${{ inputs.model || 'gwax206' }}
+          # 获取源码信息（从 action_build 目录）
+          if [ -d "action_build" ]; then
+            cd action_build
             useVersionInfo=$(git show -s --date=short --format="Author: %an<br/>date: %cd<br/>commit: %s<br/>commit hash: %H" 2>/dev/null || echo "Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown")
             echo "useVersionInfo=$useVersionInfo" >> $GITHUB_ENV
             cd ..
           else
-            echo "::warning::源码目录不存在"
+            echo "::warning::源码目录 action_build 不存在"
             echo "useVersionInfo=Author: unknown<br/>date: unknown<br/>commit: unknown<br/>commit hash: unknown" >> $GITHUB_ENV
           fi
         continue-on-error: true
