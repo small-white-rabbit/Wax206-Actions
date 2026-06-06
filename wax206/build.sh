@@ -152,10 +152,12 @@ clean_up() {
     if [[ -d "feeds" ]]; then
         ./scripts/feeds clean
     fi
-    # 清理 staging_dir 中的 stamp 文件，避免缓存状态不一致
+    # 刷新 staging_dir 中的 stamp 文件时间戳，保持缓存有效性
     if [[ -d "staging_dir" ]]; then
-        echo "清理 staging_dir 中的 stamp 文件..."
-        find staging_dir -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+        echo "刷新 staging_dir 中的 stamp 文件时间戳..."
+        find staging_dir -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+            find "$dir" -type f -exec touch {} +
+        done
     fi
     mkdir -p "tmp"
     echo "1" >"tmp/.build"
@@ -172,10 +174,12 @@ reset_feeds_conf() {
     if [[ "$COMMIT_HASH" != "none" ]]; then
         git checkout "$COMMIT_HASH"
     fi
-    # 重置源码后，再次清理 staging_dir 中的 stamp 文件，避免与缓存状态不一致
+    # 重置源码后，刷新 staging_dir 中的 stamp 文件时间戳，保持缓存有效性
     if [[ -d "staging_dir" ]]; then
-        echo "重置源码后清理 staging_dir 中的 stamp 文件..."
-        find staging_dir -type d -name "stamp" -not -path "*target*" -exec rm -rf {} + 2>/dev/null || true
+        echo "重置源码后刷新 staging_dir 中的 stamp 文件时间戳..."
+        find staging_dir -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+            find "$dir" -type f -exec touch {} +
+        done
     fi
     cd - > /dev/null
 }

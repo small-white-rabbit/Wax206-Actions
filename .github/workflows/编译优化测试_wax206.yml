@@ -66,25 +66,24 @@ jobs:
             echo "::warning::配置文件 $CONF_FILE 不存在"
           fi
 
-      # ===== 优化1: 缓存依赖 =====
+      # ===== 优化1: 缓存依赖（修正路径为action_build） =====
       - name: 缓存依赖
         uses: actions/cache@v5.0.2
         with:
           path: |
-            ./${{ inputs.model || 'gwax206' }}/.ccache
-            ./${{ inputs.model || 'gwax206' }}/staging_dir
+            ./action_build/.ccache
+            ./action_build/staging_dir
           key: ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-${{ env.BUILD_DATE }}
           restore-keys: |
             ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-
 
-      # ===== 优化2: 刷新缓存（使用touch而非rm） =====
+      # ===== 优化2: 刷新缓存（使用touch而非rm，路径修正为action_build） =====
       - name: 刷新缓存
         run: |
-          MODEL_DIR="${{ inputs.model || 'gwax206' }}"
-          if [ -d "./$MODEL_DIR/staging_dir" ]; then
+          if [ -d "./action_build/staging_dir" ]; then
             echo "刷新 staging_dir 中的 stamp 文件时间戳..."
             # 使用 touch 刷新时间戳，保持缓存有效性（关键优化！）
-            find "./$MODEL_DIR/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
+            find "./action_build/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r dir; do
               find "$dir" -type f -exec touch {} +
             done
             echo "stamp 文件时间戳刷新完成"
@@ -143,9 +142,8 @@ jobs:
             gh cache delete "$key"
           done
           echo "========cache status========"
-          MODEL_DIR="${{ inputs.model || 'gwax206' }}"
-          echo "ccache: $(du -sh ./$MODEL_DIR/.ccache 2>/dev/null | cut -f 1 || echo 'N/A')"
-          echo "staging: $(du -sh ./$MODEL_DIR/staging_dir 2>/dev/null | cut -f 1 || echo 'N/A')"
+          echo "ccache: $(du -sh ./action_build/.ccache 2>/dev/null | cut -f 1 || echo 'N/A')"
+          echo "staging: $(du -sh ./action_build/staging_dir 2>/dev/null | cut -f 1 || echo 'N/A')"
 
       - name: 输出虚拟机信息
         run: |
