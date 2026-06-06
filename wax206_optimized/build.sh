@@ -206,9 +206,9 @@ update_feeds() {
     
     [[ ! -f "$BUILD_DIR/include/bpf.mk" ]] && touch "$BUILD_DIR/include/bpf.mk"
     
-    # 更新官方 feeds（串行更新，避免并发冲突）
+    # 更新官方 feeds（只更新 feeds.conf.default 中存在的 feeds）
     echo "更新官方 feeds..."
-    ./scripts/feeds update base packages luci routing telephony
+    ./scripts/feeds update packages luci routing telephony video
     
     # 更新第三方正常源
     for feed in openclash passwall; do
