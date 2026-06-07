@@ -223,9 +223,17 @@ update_feeds() {
     
     [[ ! -f "$BUILD_DIR/include/bpf.mk" ]] && touch "$BUILD_DIR/include/bpf.mk"
     
-    # 更新所有 feeds（使用 -a 更新所有已定义的 feeds）
-    echo "=== 更新所有 feeds ==="
-    ./scripts/feeds update -a
+    # 更新 feeds（参考正常脚本的方式，选择性更新）
+    echo "=== 更新官方 feeds ==="
+    # 注意：base feed 可能不存在，但脚本会忽略错误继续执行
+    ./scripts/feeds update base packages luci routing telephony 2>/dev/null || \
+        ./scripts/feeds update packages luci routing telephony
+    
+    # 更新第三方正常源
+    echo "=== 更新第三方 feeds ==="
+    for feed in openclash passwall; do
+        ./scripts/feeds update "$feed" 2>/dev/null || echo "Warning: $feed update failed"
+    done
     
     cd - > /dev/null
 }
