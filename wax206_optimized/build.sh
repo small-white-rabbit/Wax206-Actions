@@ -301,6 +301,12 @@ update_nginx_ubus_module() {
 
 # ==================== 移除 attendedsysupgrade ====================
 remove_attendedsysupgrade() {
+    # 检查目录是否存在
+    if [[ ! -d "$BUILD_DIR/feeds/luci/collections" ]]; then
+        echo "⚠ feeds/luci/collections 目录不存在，跳过移除 attendedsysupgrade"
+        return 0
+    fi
+    
     find "$BUILD_DIR/feeds/luci/collections" -name "Makefile" | while read -r makefile; do
         grep -q "luci-app-attendedsysupgrade" "$makefile" && \
             sed -i "/luci-app-attendedsysupgrade/d" "$makefile"
