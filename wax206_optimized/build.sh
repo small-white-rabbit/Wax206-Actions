@@ -242,7 +242,11 @@ update_feeds() {
 install_feeds() {
     cd "$BUILD_DIR"
     
-    # 手动克隆特殊源（在 feeds update 之前）
+    # 关键步骤：更新 feeds 索引（创建 feeds/luci/collections 等目录）
+    echo "=== 更新 feeds 索引 ==="
+    ./scripts/feeds update -i
+    
+    # 手动克隆特殊源
     echo "=== 手动克隆特殊源 ==="
     for feed in kenzok openwrt_bandix luci_app_bandix; do
         if [[ -d "$BUILD_DIR/feeds/$feed" ]]; then
