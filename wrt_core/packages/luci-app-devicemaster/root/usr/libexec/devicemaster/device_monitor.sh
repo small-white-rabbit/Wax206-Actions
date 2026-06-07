@@ -28,11 +28,28 @@ log_msg() {
 
 # Check current mode: active or idle
 # Default is idle unless explicitly set to active
+# Also checks page activity timeout to handle browser crash/close without beforeunload
 get_mode() {
     # Priority 1: Check explicit mode file (most reliable)
     if [ -f "$MODE_FILE" ]; then
         local mode=$(cat "$MODE_FILE" 2>/dev/null | tr -d '\n\r')
         if [ "$mode" = "active" ]; then
+            # Double-check: if page_active file exists and is stale, treat as idle
+            # This handles browser crash/close without triggering beforeunload
+            if [ -f "$PAGE_ACTIVE_FILE" ]; then
+                local last_active=$(cat "$PAGE_ACTIVE_FILE" 2>/dev/null | tr -d '\n\r')
+                local now=$(date +%s)
+                if [ -n "$last_active" ] && [ "$last_active" -gt 0 ] 2>/dev/null; then
+                    local elapsed=$((now - last_active))
+                    if [ "$elapsed" -gt "$PAGE_ACTIVE_TIMEOUT" ]; then
+                        # Page activity timed out, switch to idle
+                        log_msg "Page activity timed out (${elapsed}s > ${PAGE_ACTIVE_TIMEOUT}s), forcing idle"
+                        set_mode "idle"
+                        echo "idle"
+                        return
+                    fi
+                fi
+            fi
             echo "active"
             return
         fi
@@ -161,29 +178,28 @@ write_sub_stations() {
     node_mac=$(echo "$node_mac" | tr 'a-f' 'A-F')
     
     local stmp="/tmp/dm_sub_stations.$$"
-    local raw="/tmp/dm_sub_raw.$$"
-    > "$stmp"; > "$raw"
-    
-    local ifaces=$(ls /sys/class/net/ 2>/dev/null | grep '^wl' | tr '\n' ' ')
-    [ -z "$ifaces" ] && ifaces="wl0-ap0 wl1-ap0 wl0-ap1 wl1-ap1"
-    
-    for iface in $ifaces; do
-        iwinfo "$iface" assoclist 2>/dev/null | while read -r mac rest; do
-            [ ${#mac} -ne 17 ] && continue
-            echo "${mac}|${iface}" >> "$raw"
-        done
-    done
+    > "$stmp"
     
     printf '{"node_mac":"%s","iface":"br-lan","stations":[' "$node_mac" > "$stmp"
     local sep=""
-    while IFS='|' read -r mac iface; do
-        printf '%s{"mac":"%s","iface":"%s"}' "$sep" "$(echo "$mac" | tr 'a-f' 'A-F')" "$iface" >> "$stmp"
-        sep=","
-    done < "$raw"
+    
+    # OPTIMIZED: Use iw station dump (kernel direct) instead of iwinfo assoclist
+    # iwinfo spawns ubus calls to hostapd which causes memory growth over time
+    # iw station dump reads directly from kernel, no hostapd involvement
+    for iface in wl0-ap0 wl1-ap0; do
+        iw dev "$iface" station dump 2>/dev/null | grep "^Station" | while read -r line; do
+            local mac=$(echo "$line" | awk '{print $2}')
+            [ ${#mac} -eq 17 ] && {
+                printf '%s{"mac":"%s","iface":"%s"}' "$sep" "$(echo "$mac" | tr 'a-f' 'A-F')" "$iface"
+                sep=","
+            }
+        done
+    done >> "$stmp"
+    
     printf ']}\n' >> "$stmp"
     
     cp "$stmp" "/www/luci-static/resources/dm_sub_stations.json" 2>/dev/null
-    rm -f "$stmp" "$raw"
+    rm -f "$stmp"
 }
 
 push_to_master() {
@@ -212,7 +228,9 @@ push_to_master() {
     rm -f "$report_file"
 }
 
-SUB_REPORT_INTERVAL=120
+# OPTIMIZED: Increased from 120s to 300s to reduce hostapd memory pressure
+# Frequent iwinfo calls cause hostapd/netifd memory growth due to ubus overhead
+SUB_REPORT_INTERVAL=300
 sub_last_report=0
 
 # ============================================================
