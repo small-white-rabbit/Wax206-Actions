@@ -223,13 +223,12 @@ update_feeds() {
     
     [[ ! -f "$BUILD_DIR/include/bpf.mk" ]] && touch "$BUILD_DIR/include/bpf.mk"
     
-    # 更新 feeds（参考正常脚本的方式，选择性更新）
+    # 完全复制正常脚本的 feeds 更新逻辑
     echo "=== 更新官方 feeds ==="
-    # 注意：base feed 可能不存在，但脚本会忽略错误继续执行
-    ./scripts/feeds update base packages luci routing telephony 2>/dev/null || \
-        ./scripts/feeds update packages luci routing telephony
+    # 更新官方 feeds（即使 base 不存在也继续执行）
+    ./scripts/feeds update base packages luci routing telephony 2>/dev/null || true
     
-    # 更新第三方正常源
+    # 更新 OpenClash 和 Passwall
     echo "=== 更新第三方 feeds ==="
     for feed in openclash passwall; do
         ./scripts/feeds update "$feed" 2>/dev/null || echo "Warning: $feed update failed"
@@ -246,29 +245,28 @@ install_feeds() {
     echo "=== 更新 feeds 索引 ==="
     ./scripts/feeds update -i
     
-    # 手动克隆特殊源
+    # 手动克隆特殊源（如果不存在）
     echo "=== 手动克隆特殊源 ==="
     for feed in kenzok openwrt_bandix luci_app_bandix; do
-        if [[ -d "$BUILD_DIR/feeds/$feed" ]]; then
+        if [[ ! -d "$BUILD_DIR/feeds/$feed" ]]; then
+            echo "克隆 $feed..."
+            mkdir -p "$BUILD_DIR/feeds/$feed"
+            case "$feed" in
+                kenzok) git clone --depth 1 https://github.com/kenzok8/openwrt-packages.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
+                openwrt_bandix) git clone --depth 1 https://github.com/timsaya/openwrt-bandix.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
+                luci_app_bandix) git clone --depth 1 https://github.com/timsaya/luci-app-bandix.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
+            esac
+        else
             echo "✓ $feed 已存在，跳过克隆"
-            continue
         fi
-        echo "克隆 $feed..."
-        mkdir -p "$BUILD_DIR/feeds/$feed"
-        case "$feed" in
-            kenzok) git clone --depth 1 https://github.com/kenzok8/openwrt-packages.git "$BUILD_DIR/feeds/$feed" ;;
-            openwrt_bandix) git clone --depth 1 https://github.com/timsaya/openwrt-bandix.git "$BUILD_DIR/feeds/$feed" ;;
-            luci_app_bandix) git clone --depth 1 https://github.com/timsaya/luci-app-bandix.git "$BUILD_DIR/feeds/$feed" ;;
-        esac
     done
     
-    # 安装所有 feeds
-    echo "=== 安装所有 feeds ==="
-    ./scripts/feeds install -a
-    
-    # 安装官方 feeds（确保所有包都安装）
-    for feed in packages luci routing telephony video; do
-        [[ -d "$BUILD_DIR/feeds/$feed" ]] && ./scripts/feeds install -f -ap "$feed"
+    # 安装官方 feeds
+    echo "=== 安装官方 feeds ==="
+    for feed in base packages luci routing telephony; do
+        if [[ -d "$BUILD_DIR/feeds/$feed" ]]; then
+            ./scripts/feeds install -f -ap "$feed"
+        fi
     done
     
     # 安装 OpenClash 和 Passwall
