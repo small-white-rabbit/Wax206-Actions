@@ -423,17 +423,19 @@ clone_source
 clean_up
 reset_feeds_conf
 
-# Step 3: 更新 feeds（并行）
+# Step 3: 更新 feeds
 update_feeds
+
+# Step 4: 安装 feeds（先安装，确保 feeds/luci/collections 目录存在）
+install_feeds
+
+# Step 5: 更新 golang 和其他修复（在 feeds 安装后执行）
 update_golang
 fix_rust_compile_error
 update_nginx_ubus_module
 remove_attendedsysupgrade
 
-# Step 4: 安装 feeds
-install_feeds
-
-# Step 5: DIY 配置（模块化）
+# Step 6: DIY 配置（模块化）
 run_diy "$BUILD_DIR" "$REPO_ROOT"
 
 # Step 6: 替换自定义文件
