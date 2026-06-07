@@ -44,6 +44,15 @@ jobs:
 
       - name: 检出
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史，确保最新代码
+
+      - name: 确认脚本版本
+        run: |
+          echo "=== 检查 build.sh 版本 ==="
+          head -20 wax206_optimized/build.sh
+          grep -n "remove_attendedsysupgrade" wax206_optimized/build.sh | head -5
+          grep -A5 "remove_attendedsysupgrade()" wax206_optimized/build.sh | head -10
 
       - name: 修复脚本执行权限
         run: chmod +x wax206_optimized/build.sh
