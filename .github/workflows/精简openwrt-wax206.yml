@@ -67,6 +67,13 @@ jobs:
             echo "::warning::配置文件 $CONF_FILE 不存在"
           fi
 
+          # 设置 VARIANT 用于固件重命名
+          case "${{ inputs.model || 'wax206' }}" in
+            fmwax206) echo "VARIANT=70m" >> $GITHUB_ENV ;;
+            gwax206|gwax206_imm) echo "VARIANT=256m" >> $GITHUB_ENV ;;
+            *) echo "VARIANT=" >> $GITHUB_ENV ;;
+          esac
+
       - name: 缓存依赖
         uses: actions/cache@v5.0.2
         with:

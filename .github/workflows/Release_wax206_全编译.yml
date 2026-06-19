@@ -92,8 +92,8 @@ jobs:
         if: matrix.variant != 'wax206'
         run: |
           cd action_build
-          cp $GITHUB_WORKSPACE/dts/${{ matrix.dts }} target/linux/mediatek/dts/mt7622-netgear-wax206.dts
-          cp $GITHUB_WORKSPACE/mediatek/image/${{ matrix.mk_file }} target/linux/mediatek/image/mt7622.mk
+          cp $GITHUB_WORKSPACE/wrt_core/dts/${{ matrix.dts }} target/linux/mediatek/dts/mt7622-netgear-wax206.dts
+          cp $GITHUB_WORKSPACE/wrt_core/mediatek/image/${{ matrix.mk_file }} target/linux/mediatek/image/mt7622.mk
           echo "已应用 ${{ matrix.variant }} 配置"
 
       - name: 缓存依赖

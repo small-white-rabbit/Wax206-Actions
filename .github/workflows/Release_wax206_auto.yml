@@ -73,7 +73,14 @@ jobs:
           else
             echo "BUILD_SRC=Unknown" >> $GITHUB_ENV
             echo "::warning::配置文件 $CONF_FILE 不存在"
-          fi 
+          fi
+
+          # 设置 VARIANT 用于固件重命名
+          case "${{ inputs.model || 'wax206' }}" in
+            fmwax206) echo "VARIANT=70m" >> $GITHUB_ENV ;;
+            gwax206|gwax206_imm) echo "VARIANT=256m" >> $GITHUB_ENV ;;
+            *) echo "VARIANT=" >> $GITHUB_ENV ;;
+          esac
           
       - name: 克隆固件代码
         run: ./wrt_core/pre_clone_action.sh ${{ inputs.model || 'wax206'}}
