@@ -14,7 +14,7 @@ local sys = require("luci.sys")
 
 -- Input validation helpers (prevent command injection)
 local function is_valid_mac(mac)
-    return mac and mac:match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$")
+    return mac and mac:lower():match("^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$") ~= nil
 end
 
 local function is_valid_ip(ip)
@@ -2639,10 +2639,13 @@ function api_delete_device()
         return
     end
     
+    -- Normalize for comparison
+    local mac_upper = mac:upper()
+    
     -- Find and delete the device section by MAC
     local found = false
     uci:foreach("devicemaster", "device", function(s)
-        if s.mac and s.mac:upper() == mac:upper() then
+        if s.mac and s.mac:upper() == mac_upper then
             uci:delete("devicemaster", s[".name"])
             found = true
             return false  -- stop iteration
@@ -2652,11 +2655,16 @@ function api_delete_device()
     if found then
         local ok7, err7 = uci:commit("devicemaster")
         if not ok7 then log_msg("WARN: uci commit failed: " .. tostring(err7)) end
-        cleanup_deleted_device_identity(mac)
-        json_response({success = true})
     else
-        json_response({success = false, error = "Device not found"})
+        -- Device was not persisted in UCI (e.g. ARP-only transient entry or an
+        -- offline snapshot from a mesh master). Treat the deletion as successful
+        -- so the UI does not report an error; if the device is still online it
+        -- will be rediscovered on the next scan.
+        log_msg("Delete request for transient device " .. mac)
     end
+    
+    cleanup_deleted_device_identity(mac)
+    json_response({success = true})
 end
 
 -- API: Scan network (trigger ARP flood to discover new devices)
