@@ -50,7 +50,10 @@ install_feeds() {
         case "$feed_name" in
             *.tmp|*.index|*.targetindex) continue ;;
             small)
-                echo "跳过 $feed_name 源的全量安装（仅作为依赖源）"
+                # honk 及其 LuCI 界面的唯一可用来源（bandix/kenzok 均无此包）
+                # 只选择性安装这两个包，避免 small 源全量安装与官方源冲突
+                echo "选择性安装 $feed_name 源中的 honk / luci-app-honk..."
+                ./scripts/feeds install -p small -f honk luci-app-honk
                 continue
                 ;;
             kenzok)

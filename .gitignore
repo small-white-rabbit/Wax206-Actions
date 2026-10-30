@@ -1,0 +1,6 @@
+# 工作代理备份/记忆目录
+.workbuddy/
+
+# 系统文件
+.DS_Store
+Thumbs.db
