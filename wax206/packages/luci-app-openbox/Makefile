@@ -8,7 +8,7 @@
 
 include $(TOPDIR)/rules.mk
 
-PKG_NAME:=openbox
+PKG_NAME:=luci-app-openbox
 PKG_VERSION:=0.1.378
 PKG_RELEASE:=1
 
@@ -23,7 +23,7 @@ PKG_LICENSE:=Proprietary
 
 include $(INCLUDE_DIR)/package.mk
 
-define Package/openbox
+define Package/luci-app-openbox
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=Web Servers/Proxies
@@ -32,7 +32,7 @@ define Package/openbox
   DEPENDS:=+kmod-tun +kmod-nft-queue +kmod-nft-nat +kmod-veth +ip-full +ca-bundle
 endef
 
-define Package/openbox/description
+define Package/luci-app-openbox/description
   Open-Box 一体化透明代理。安装包内置 Open-Box、sing-box 内核、
   Node 运行时以及完整 GeoSite / GeoIP 数据,通过浏览器面板完成
   订阅、节点、分流、DNS 和防火墙设置。
@@ -49,7 +49,7 @@ endef
 define Build/Install
 endef
 
-define Package/openbox/install
+define Package/luci-app-openbox/install
 	# 主体安装到 /opt/open-box(tarball 解开后直接就是 open-box 目录内容)
 	$(INSTALL_DIR) $(1)/opt/open-box
 	$(CP) $(PKG_BUILD_DIR)/* $(1)/opt/open-box/
@@ -84,8 +84,8 @@ define Package/openbox/install
 endef
 
 # 配置数据目录升级时保留
-define Package/openbox/conffiles
+define Package/luci-app-openbox/conffiles
 /opt/open-box/data
 endef
 
-$(eval $(call BuildPackage,openbox))
+$(eval $(call BuildPackage,luci-app-openbox))
