@@ -26,6 +26,15 @@ else
     echo "⚠ 警告: wax206/packages/luci-app-devicemaster 不存在，跳过插件安装"
 fi
 
+echo ">>> 添加自定义插件 openbox(Open-Box 闭源二进制分发)..."
+
+if [ -d "wax206/packages/luci-app-openbox" ]; then
+    cp -r wax206/packages/luci-app-openbox "$BUILD_DIR/package/openbox"
+    echo "✓ 插件已复制到 $BUILD_DIR/package/openbox"
+else
+    echo "⚠ 警告: wax206/packages/luci-app-openbox 不存在，跳过插件安装"
+fi
+
 cd "./$BUILD_DIR" || exit 1
 echo "进入目录: $(pwd)"
 
