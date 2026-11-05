@@ -120,7 +120,9 @@ net.ipv4.tcp_slow_start_after_idle=0
 EOF
 echo "✓ /etc/sysctl.d/99-network.conf 已写入"
 
-echo "nf_conntrack hashsize=65536" > package/base-files/files/etc/modules.d/99-nf-conntrack-custom
+# conntrack 哈希表：实测并发连接仅 ~1900 条，65536 桶属于过度预分配。
+# 16384 桶（vmalloc 约 256KB）足够上万条连接，比 65536 桶省约 0.75MB 内核内存。
+echo "nf_conntrack hashsize=16384" > package/base-files/files/etc/modules.d/99-nf-conntrack-custom
 echo "✓ /etc/modules.d/99-nf-conntrack-custom 已写入"
 
 cat > package/base-files/files/etc/hotplug.d/iface/99-conntrack << 'HOTPLUG'
@@ -165,6 +167,24 @@ else
     echo "警告: 未找到 $MAC80211_UC"
     find . -name "mac80211.uc" -type f 2>/dev/null
 fi
+
+# ==========================================
+# 运行内存收口：默认关闭常驻 Web 终端（2026-11-05）
+# ==========================================
+# 实测 ttyd 在本机常驻 RSS 约 3.9MB（主机/子机各一份），日常用 SSH 时完全用不到。
+# 这里只关闭“开机自启”，包仍保留；需要网页终端时在
+# LuCI → 系统 → 管理权 → 终端 里一键重新启用即可。
+mkdir -p package/base-files/files/etc/uci-defaults
+cat > package/base-files/files/etc/uci-defaults/99-mem-trim << 'EOF'
+#!/bin/sh
+if [ -f /etc/config/ttyd ] && uci -q get ttyd.@ttyd[0] >/dev/null 2>&1; then
+    uci -q set ttyd.@ttyd[0].enable=0
+    uci -q commit ttyd
+fi
+exit 0
+EOF
+chmod +x package/base-files/files/etc/uci-defaults/99-mem-trim
+echo "✓ /etc/uci-defaults/99-mem-trim 已写入（ttyd 默认不自启）"
 
 echo "=========================================="
 echo "DIY 配置完成！"
