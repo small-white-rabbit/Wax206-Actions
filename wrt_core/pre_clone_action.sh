@@ -12,6 +12,8 @@ fi
 
 BASE_PATH=$(cd "$WRT_CORE_PATH" && pwd)
 
+source "$BASE_PATH/modules/network.sh"
+
 Dev=$1
 
 INI_FILE="$BASE_PATH/compilecfg/$Dev.ini"
@@ -39,7 +41,10 @@ BUILD_DIR="$BASE_PATH/../action_build"
 echo $REPO_URL $REPO_BRANCH
 # Write flag one level up from wrt_core (repo root usually)
 echo "$REPO_URL/$REPO_BRANCH" >"$BASE_PATH/../repo_flag"
-git clone --depth 1 -b $REPO_BRANCH $REPO_URL $BUILD_DIR
+if ! git_retry clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BUILD_DIR"; then
+    echo "错误：克隆仓库 $REPO_URL 失败" >&2
+    exit 1
+fi
 
 # GitHub Action 移除国内下载源
 PROJECT_MIRRORS_FILE="$BUILD_DIR/scripts/projectsmirrors.json"

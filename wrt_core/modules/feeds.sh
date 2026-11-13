@@ -36,11 +36,11 @@ update_feeds() {
         touch "$BUILD_DIR/include/bpf.mk"
     fi
 
-    ./scripts/feeds update -a
+    network_retry ./scripts/feeds update -a
 }
 
 install_feeds() {
-    ./scripts/feeds update -i
+    network_retry ./scripts/feeds update -i
     # 跳过 kenzok8 源的全量安装，避免与官方源包冲突
     # kenzok8/small 和 kenzok/openwrt-packages 仅作为依赖源
     for feed in "$BUILD_DIR"/feeds/*; do

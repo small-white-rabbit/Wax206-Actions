@@ -67,7 +67,7 @@ update_golang() {
     if [[ -d ./feeds/packages/lang/golang ]]; then
         echo "正在更新 golang 软件包..."
         \rm -rf ./feeds/packages/lang/golang
-        if ! git clone --depth 1 -b $GOLANG_BRANCH $GOLANG_REPO ./feeds/packages/lang/golang; then
+        if ! git_retry clone --depth 1 -b $GOLANG_BRANCH $GOLANG_REPO ./feeds/packages/lang/golang; then
             echo "错误：克隆 golang 仓库 $GOLANG_REPO 失败" >&2
             exit 1
         fi
@@ -96,7 +96,7 @@ sync_sparse_packages_to_feed_dir() {
     clone_args+=("$repo_url" "$tmp_dir")
 
     echo "正在从 $repo_label 稀疏同步指定目录..."
-    if ! git "${clone_args[@]}"; then
+    if ! git_retry "${clone_args[@]}"; then
         echo "错误：从 $repo_url 拉取仓库骨架失败" >&2
         rm -rf "$tmp_dir"
         return 1
@@ -209,7 +209,7 @@ install_custom_feed() {
     register_local_feed_source "$custom_feed_dir" "$feeds_path"
 
     echo "正在更新 $custom_feed_name 本地 feed 索引..."
-    ./scripts/feeds update "$custom_feed_name"
+    network_retry ./scripts/feeds update "$custom_feed_name"
 
     echo "正在安装 $custom_feed_name 中的包..."
     for pkg in "${base_custom_feed_packages[@]}"; do
@@ -266,7 +266,7 @@ check_default_settings() {
         echo "在 $BUILD_DIR/package 中未找到 default-settings 目录，正在从 immortalwrt 仓库克隆..."
         local tmp_dir
         tmp_dir=$(mktemp -d)
-        if git clone --depth 1 --filter=blob:none --sparse https://github.com/immortalwrt/immortalwrt.git "$tmp_dir"; then
+        if git_retry clone --depth 1 --filter=blob:none --sparse https://github.com/immortalwrt/immortalwrt.git "$tmp_dir"; then
             pushd "$tmp_dir" >/dev/null
             git sparse-checkout set package/emortal/default-settings
             mkdir -p "$(dirname "$settings_dir")"
@@ -289,7 +289,7 @@ add_ax6600_led() {
     echo "正在添加 luci-app-athena-led..."
     rm -rf "$athena_led_dir" 2>/dev/null
 
-    if ! git clone --depth=1 "$repo_url" "$athena_led_dir"; then
+    if ! git_retry clone --depth=1 "$repo_url" "$athena_led_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-athena-led 仓库失败" >&2
         exit 1
     fi
@@ -310,7 +310,7 @@ update_homeproxy() {
     if [ -d "$target_dir" ]; then
         echo "正在更新 homeproxy..."
         rm -rf "$target_dir"
-        if ! git clone --depth 1 "$repo_url" "$target_dir"; then
+        if ! git_retry clone --depth 1 "$repo_url" "$target_dir"; then
             echo "错误：从 $repo_url 克隆 homeproxy 仓库失败" >&2
             exit 1
         fi
@@ -322,7 +322,7 @@ add_timecontrol() {
     local repo_url="https://github.com/sirpdboy/luci-app-timecontrol.git"
     rm -rf "$timecontrol_dir" 2>/dev/null
     echo "正在添加 luci-app-timecontrol..."
-    if ! git clone --depth 1 "$repo_url" "$timecontrol_dir"; then
+    if ! git_retry clone --depth 1 "$repo_url" "$timecontrol_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-timecontrol 仓库失败" >&2
         exit 1
     fi
@@ -335,7 +335,7 @@ update_adguardhome() {
     echo "正在更新 luci-app-adguardhome..."
     rm -rf "$adguardhome_dir" 2>/dev/null
 
-    if ! git clone --depth 1 "$repo_url" "$adguardhome_dir"; then
+    if ! git_retry clone --depth 1 "$repo_url" "$adguardhome_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-adguardhome 仓库失败" >&2
         exit 1
     fi
@@ -355,7 +355,7 @@ update_lucky() {
 
         echo "正在从 $lucky_repo_url 稀疏检出 luci-app-lucky 和 lucky..."
 
-        if ! git clone --depth 1 --filter=blob:none --no-checkout "$lucky_repo_url" "$tmp_dir"; then
+        if ! git_retry clone --depth 1 --filter=blob:none --no-checkout "$lucky_repo_url" "$tmp_dir"; then
             echo "错误：从 $lucky_repo_url 克隆仓库失败" >&2
             rm -rf "$tmp_dir"
             return 0
@@ -418,7 +418,7 @@ update_smartdns() {
 
     echo "正在更新 smartdns..."
     rm -rf "$SMARTDNS_DIR"
-    if ! git clone --depth=1 "$SMARTDNS_REPO" "$SMARTDNS_DIR"; then
+    if ! git_retry clone --depth=1 "$SMARTDNS_REPO" "$SMARTDNS_DIR"; then
         echo "错误：从 $SMARTDNS_REPO 克隆 smartdns 仓库失败" >&2
         exit 1
     fi
@@ -428,7 +428,7 @@ update_smartdns() {
 
     echo "正在更新 luci-app-smartdns..."
     rm -rf "$LUCI_APP_SMARTDNS_DIR"
-    if ! git clone --depth=1 "$LUCI_APP_SMARTDNS_REPO" "$LUCI_APP_SMARTDNS_DIR"; then
+    if ! git_retry clone --depth=1 "$LUCI_APP_SMARTDNS_REPO" "$LUCI_APP_SMARTDNS_DIR"; then
         echo "错误：从 $LUCI_APP_SMARTDNS_REPO 克隆 luci-app-smartdns 仓库失败" >&2
         exit 1
     fi
@@ -442,7 +442,7 @@ update_diskman() {
         cd "$BUILD_DIR/feeds/luci/applications" || return
         \rm -rf "luci-app-diskman"
 
-        if ! git clone --filter=blob:none --no-checkout "$repo_url" diskman; then
+        if ! git_retry clone --filter=blob:none --no-checkout "$repo_url" diskman; then
             echo "错误：从 $repo_url 克隆 diskman 仓库失败" >&2
             exit 1
         fi
@@ -472,7 +472,7 @@ _sync_luci_lib_docker() {
         mkdir -p "$BUILD_DIR/feeds/luci/libs" || return
         cd "$BUILD_DIR/feeds/luci/libs" || return
         
-        if ! git clone --filter=blob:none --no-checkout "$repo_url" luci-lib-docker-tmp; then
+        if ! git_retry clone --filter=blob:none --no-checkout "$repo_url" luci-lib-docker-tmp; then
             echo "错误：从 $repo_url 克隆 luci-lib-docker 仓库失败" >&2
             exit 1
         fi
@@ -502,7 +502,7 @@ update_dockerman() {
         cd "$BUILD_DIR/feeds/luci/applications" || return
         \rm -rf "luci-app-dockerman"
 
-        if ! git clone --filter=blob:none --no-checkout "$repo_url" dockerman; then
+        if ! git_retry clone --filter=blob:none --no-checkout "$repo_url" dockerman; then
             echo "错误：从 $repo_url 克隆 dockerman 仓库失败" >&2
             exit 1
         fi
@@ -533,7 +533,7 @@ add_quickfile() {
         rm -rf "$target_dir"
     fi
     echo "正在添加 luci-app-quickfile..."
-    if ! git clone --depth 1 "$repo_url" "$target_dir"; then
+    if ! git_retry clone --depth 1 "$repo_url" "$target_dir"; then
         echo "错误：从 $repo_url 克隆 luci-app-quickfile 仓库失败" >&2
         exit 1
     fi
@@ -557,7 +557,7 @@ update_argon() {
 
     echo "正在更新 argon 主题..."
 
-    if ! git clone --depth 1 "$repo_url" "$tmp_dir"; then
+    if ! git_retry clone --depth 1 "$repo_url" "$tmp_dir"; then
         echo "错误：从 $repo_url 克隆 argon 主题仓库失败" >&2
         rm -rf "$tmp_dir"
         exit 1

@@ -20,7 +20,7 @@ clone_repo() {
         rm -rf "$BUILD_DIR"
         
         echo "克隆仓库: $REPO_URL 分支: $REPO_BRANCH"
-        if ! git clone --depth 1 -b $REPO_BRANCH $REPO_URL $BUILD_DIR; then
+        if ! git_retry clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BUILD_DIR"; then
             echo "错误：克隆仓库 $REPO_URL 失败" >&2
             exit 1
         fi
@@ -35,7 +35,7 @@ clone_repo() {
         rm -rf "${BUILD_DIR}_cache_temp"
     else
         echo "克隆仓库: $REPO_URL 分支: $REPO_BRANCH"
-        if ! git clone --depth 1 -b $REPO_BRANCH $REPO_URL $BUILD_DIR; then
+        if ! git_retry clone --depth 1 -b "$REPO_BRANCH" "$REPO_URL" "$BUILD_DIR"; then
             echo "错误：克隆仓库 $REPO_URL 失败" >&2
             exit 1
         fi
@@ -74,7 +74,7 @@ reset_feeds_conf() {
     fi
     # 浅克隆(--depth 1)不会创建远程分支引用(如 origin/main)
     # 先 fetch 建立 origin/$REPO_BRANCH 引用，再 reset
-    git fetch origin $REPO_BRANCH --depth 1
+    git_retry fetch origin "$REPO_BRANCH" --depth 1
     git reset --hard origin/$REPO_BRANCH
     # 使用 -e 排除缓存目录，避免删除 staging_dir 和 .ccache
     git clean -f -d -e staging_dir -e .ccache -e tmp

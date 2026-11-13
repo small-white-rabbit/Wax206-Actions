@@ -175,7 +175,7 @@ echo "开始编译: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "并行编译数: $(($(nproc) * 2))"
 echo "=============================================="
 
-make -j$(($(nproc) * 2))
+make -j$(($(nproc) * 2)) || make -j1 V=s
 
 BUILD_END=$(date +%s)
 BUILD_DURATION=$((BUILD_END - BUILD_START))
