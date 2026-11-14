@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+# WAX206 转发数据面多核分发（仅转发加速相关）
+# 固化位置：/etc/init.d/forward-affinity，由 uci-defaults/993_forward_offload 执行 enable
+# 说明与回退方法见工作区《WAX206-转发加速优化记录.md》
+START=99
+USE_PROCD=1
+
+apply_affinity() {
+	local irq d
+	irq=$(awk '/1b100000\.ethernet/ { n++; if (n == 2) { sub(/:$/, "", $1); print $1; exit } }' /proc/interrupts)
+	[ -n "$irq" ] && [ -e "/proc/irq/$irq/smp_affinity" ] && echo 2 > "/proc/irq/$irq/smp_affinity"
+	for d in /sys/class/net/wl*-ap0 /sys/class/net/wl*-mesh0; do
+		[ -e "$d/queues/rx-0/rps_cpus" ] && echo 2 > "$d/queues/rx-0/rps_cpus"
+	done
+}
+
+start_service() {
+	apply_affinity
+}
+
+reload_service() {
+	apply_affinity
+}
+
+service_triggers() {
+	procd_add_reload_trigger "network"
+	procd_add_reload_trigger "firewall"
+	procd_add_raw_trigger "interface.*" 2000 /etc/init.d/forward-affinity reload
+}

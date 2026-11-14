@@ -26,6 +26,18 @@ else
     echo "⚠ 警告: wax206/packages/luci-app-devicemaster 不存在，跳过插件安装"
 fi
 
+# ========== 转发加速固化（flow offload + IRQ/RPS 多核分发） ==========
+# 与 wrt_core/modules/system.sh 的注入等价且幂等；此链由 sh/build.sh 调用
+if [ -f "wrt_core/patches/993_forward_offload" ] && [ -f "wrt_core/patches/forward-affinity" ]; then
+    DEST_FILES="$BUILD_DIR/package/base-files/files"
+    mkdir -p "$DEST_FILES/etc/uci-defaults" "$DEST_FILES/etc/init.d"
+    install -Dm544 "wrt_core/patches/993_forward_offload" "$DEST_FILES/etc/uci-defaults/993_forward_offload"
+    install -Dm755 "wrt_core/patches/forward-affinity" "$DEST_FILES/etc/init.d/forward-affinity"
+    echo "✓ 转发加速配置已固化到固件"
+else
+    echo "⚠ 警告: 未找到转发加速补丁文件，跳过固化"
+fi
+
 cd "./$BUILD_DIR" || exit 1
 echo "进入目录: $(pwd)"
 

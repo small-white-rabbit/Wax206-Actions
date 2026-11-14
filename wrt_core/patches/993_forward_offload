@@ -1,0 +1,19 @@
+#!/bin/sh
+# WAX206 转发加速固化：flow offload + IRQ/RPS 服务自启
+# 注入点：wrt_core/modules/system.sh、diy-part2.sh、wax206/build.sh
+# 首次启动时执行一次；实测依据与回退见《WAX206-转发加速优化记录.md》
+# 注意：flow_offloading_hw 在本机的作用是让 fw4 展开物理口 devices 以启用软件快路径，
+#       并非启用 PPE 硬件转发（实测 PPE BND=0）。升级内核后须按优化记录第 5 节监控表复核。
+
+[ -f /etc/config/firewall ] || exit 0
+uci -q get 'firewall.@defaults[0]' >/dev/null 2>&1 || exit 0
+
+uci -q batch <<'EOF'
+set firewall.@defaults[0].flow_offloading=1
+set firewall.@defaults[0].flow_offloading_hw=1
+commit firewall
+EOF
+
+[ -x /etc/init.d/forward-affinity ] && /etc/init.d/forward-affinity enable
+
+exit 0

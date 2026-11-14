@@ -532,6 +532,18 @@ run_diy_part2() {
         echo "⚠ 警告: $REPO_ROOT/wax206/packages/luci-app-devicemaster 不存在，跳过插件安装"
     fi
 
+    # ========== 转发加速固化（flow offload + IRQ/RPS 多核分发） ==========
+    # 与 wrt_core/modules/system.sh、根目录 diy-part2.sh 的注入等价且幂等
+    if [ -f "$REPO_ROOT/wrt_core/patches/993_forward_offload" ] && [ -f "$REPO_ROOT/wrt_core/patches/forward-affinity" ]; then
+        local DEST_FILES="$BUILD_DIR/package/base-files/files"
+        mkdir -p "$DEST_FILES/etc/uci-defaults" "$DEST_FILES/etc/init.d"
+        install -Dm544 "$REPO_ROOT/wrt_core/patches/993_forward_offload" "$DEST_FILES/etc/uci-defaults/993_forward_offload"
+        install -Dm755 "$REPO_ROOT/wrt_core/patches/forward-affinity" "$DEST_FILES/etc/init.d/forward-affinity"
+        echo "✓ 转发加速配置已固化到固件"
+    else
+        echo "⚠ 警告: 未找到转发加速补丁文件，跳过固化"
+    fi
+
     cd "$BUILD_DIR" || exit 1
     echo "进入目录: $(pwd)"
 

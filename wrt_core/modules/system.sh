@@ -9,6 +9,15 @@ fix_default_set() {
     install -Dm544 "$BASE_PATH/patches/991_custom_settings" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/991_custom_settings"
     install -Dm544 "$BASE_PATH/patches/992_set-wifi-uci.sh" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/992_set-wifi-uci.sh"
 
+    # 转发加速固化：flow offload UCI 默认值 + IRQ/RPS 多核分发服务
+    if [ -f "$BASE_PATH/patches/993_forward_offload" ] && [ -f "$BASE_PATH/patches/forward-affinity" ]; then
+        install -Dm544 "$BASE_PATH/patches/993_forward_offload" "$BUILD_DIR/package/base-files/files/etc/uci-defaults/993_forward_offload"
+        install -Dm755 "$BASE_PATH/patches/forward-affinity" "$BUILD_DIR/package/base-files/files/etc/init.d/forward-affinity"
+        echo "转发加速配置已固化到固件"
+    else
+        echo "警告: 未找到转发加速补丁文件，跳过固化" >&2
+    fi
+
     if [ -f "$BUILD_DIR/package/emortal/autocore/files/tempinfo" ]; then
         if [ -f "$BASE_PATH/patches/tempinfo" ]; then
             \cp -f "$BASE_PATH/patches/tempinfo" "$BUILD_DIR/package/emortal/autocore/files/tempinfo"
@@ -330,6 +339,8 @@ add_backup_info_to_sysupgrade() {
 /etc/AdGuardHome.yaml
 /etc/easytier
 /etc/lucky/
+/etc/init.d/forward-affinity
+/etc/rc.d/S99forward-affinity
 EOF
     fi
 }
