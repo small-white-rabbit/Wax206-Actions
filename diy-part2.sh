@@ -48,6 +48,24 @@ if [ -d "package/luci-app-devicemaster" ]; then
     echo "✓ luci-app-devicemaster feeds 安装完成"
 fi
 
+# LuCI 已用内存采用 MemAvailable 口径，避免把可回收缓存算作占用
+MEMORY_VIEW="feeds/luci/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/20_memory.js"
+if [ -f "$MEMORY_VIEW" ]; then
+    if ! grep -qF '(mem.total&&mem.available!=null)?(mem.total-mem.available):null' "$MEMORY_VIEW"; then
+        if grep -qF '(mem.total&&mem.free)?(mem.total-mem.free):null' "$MEMORY_VIEW"; then
+            sed -i 's/(mem.total&&mem.free)?(mem.total-mem.free):null/(mem.total\&\&mem.available!=null)?(mem.total-mem.available):null/' "$MEMORY_VIEW"
+        else
+            echo "错误：LuCI 内存页面结构已变化，无法安全修正内存口径" >&2
+            exit 1
+        fi
+    fi
+    grep -qF '(mem.total&&mem.available!=null)?(mem.total-mem.available):null' "$MEMORY_VIEW" || exit 1
+    echo "✓ LuCI 已用内存已改为 MemAvailable 口径"
+else
+    echo "错误：未找到 LuCI 内存页面 $MEMORY_VIEW" >&2
+    exit 1
+fi
+
 # ==========================================
 # 配置IP
 # ==========================================
@@ -104,7 +122,7 @@ mkdir -p package/base-files/files/etc/modules.d
 mkdir -p package/base-files/files/etc/hotplug.d/iface
 
 cat > package/base-files/files/etc/sysctl.d/99-conntrack.conf << 'EOF'
-net.netfilter.nf_conntrack_max=262144
+net.netfilter.nf_conntrack_max=65535
 net.netfilter.nf_conntrack_tcp_timeout_established=600
 net.netfilter.nf_conntrack_tcp_timeout_time_wait=30
 net.netfilter.nf_conntrack_tcp_timeout_close_wait=10
@@ -121,16 +139,13 @@ EOF
 echo "✓ /etc/sysctl.d/99-conntrack.conf 已写入"
 
 cat > package/base-files/files/etc/sysctl.d/99-network.conf << 'EOF'
-net.core.netdev_max_backlog=65536
+net.core.netdev_max_backlog=4096
 net.core.netdev_budget=50000
-net.ipv4.tcp_mem=262144 524288 786432
-net.ipv4.tcp_rmem=4096 87380 6291456
-net.ipv4.tcp_wmem=4096 65536 6291456
 net.ipv4.tcp_congestion_control=cubic
 net.ipv4.ip_local_port_range=1024 65535
 net.ipv4.tcp_slow_start_after_idle=0
 EOF
-echo "✓ /etc/sysctl.d/99-network.conf 已写入"
+echo "✓ /etc/sysctl.d/99-network.conf 已写入（TCP 缓冲由内核按物理内存自动计算）"
 
 # conntrack 哈希表：实测并发连接仅 ~1900 条，65536 桶属于过度预分配。
 # 16384 桶（vmalloc 约 256KB）足够上万条连接，比 65536 桶省约 0.75MB 内核内存。
@@ -141,7 +156,7 @@ cat > package/base-files/files/etc/hotplug.d/iface/99-conntrack << 'HOTPLUG'
 #!/bin/sh
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "wan" ] && {
     sleep 2
-    echo 262144 > /proc/sys/net/netfilter/nf_conntrack_max
+    echo 65535 > /proc/sys/net/netfilter/nf_conntrack_max
     echo 600 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_established
     echo 30 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_time_wait
     echo 10 > /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_close_wait

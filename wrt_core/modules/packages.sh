@@ -570,6 +570,21 @@ update_argon() {
     echo "luci-theme-argon 更新完成"
 }
 
+update_carbon() {
+    local repo_url="https://github.com/mrjoechen/luci-theme-carbon.git"
+    local dst_theme_path="$BUILD_DIR/feeds/luci/themes/luci-theme-carbon"
+
+    echo "正在添加 Carbon 主题..."
+    rm -rf "$dst_theme_path"
+    if ! git_retry clone --depth 1 "$repo_url" "$dst_theme_path"; then
+        echo "错误：从 $repo_url 克隆 Carbon 主题仓库失败" >&2
+        exit 1
+    fi
+    rm -rf "$dst_theme_path/.git"
+
+    echo "luci-theme-carbon 添加完成"
+}
+
 remove_attendedsysupgrade() {
     find "$BUILD_DIR/feeds/luci/collections" -name "Makefile" | while read -r makefile; do
         if grep -q "luci-app-attendedsysupgrade" "$makefile"; then

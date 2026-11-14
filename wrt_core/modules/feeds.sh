@@ -31,6 +31,7 @@ update_feeds() {
     append_feed_if_missing "$FEEDS_PATH" "luci_app_bandix" "src-git luci_app_bandix https://github.com/timsaya/luci-app-bandix.git;main"
     append_feed_if_missing "$FEEDS_PATH" "kenzok" "src-git kenzok https://github.com/kenzok8/openwrt-packages.git;master"
     append_feed_if_missing "$FEEDS_PATH" "small" "src-git small https://github.com/kenzok8/small.git;master"
+    append_feed_if_missing "$FEEDS_PATH" "luci-theme-vantage" "src-git vantage https://github.com/anothaDev/luci-theme-vantage.git;main"
 
     if [ ! -f "$BUILD_DIR/include/bpf.mk" ]; then
         touch "$BUILD_DIR/include/bpf.mk"
@@ -60,6 +61,12 @@ install_feeds() {
                 # kenzok 源选择性安装需要的包，避免与官方源冲突
                 echo "选择性安装 kenzok 源中的包..."
                 ./scripts/feeds install -p kenzok -f luci-theme-argon luci-app-argon-config
+                ;;
+            vantage)
+                # Vantage 官方 feed，仅安装主题与仪表盘，语言包由对应源码目录生成
+                echo "选择性安装 Vantage 主题与仪表盘..."
+                ./scripts/feeds install -p vantage -f luci-theme-vantage luci-app-vantage
+                continue
                 ;;
             openwrt_bandix)
                 # openwrt-bandix 后端
