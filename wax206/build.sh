@@ -244,22 +244,12 @@ update_feeds() {
         echo "src-git openclash https://github.com/vernesong/OpenClash.git;master" >>"$FEEDS_PATH"
     fi
 
-    if ! grep -q "openwrt_bandix" "$BUILD_DIR/$FEEDS_CONF"; then
-        [ -z "$(tail -c 1 "$BUILD_DIR/$FEEDS_CONF")" ] || echo "" >>"$BUILD_DIR/$FEEDS_CONF"
-        echo 'src-git openwrt_bandix https://github.com/timsaya/openwrt-bandix.git;main' >>"$BUILD_DIR/$FEEDS_CONF"
-    fi
-
-    if ! grep -q "luci_app_bandix" "$BUILD_DIR/$FEEDS_CONF"; then
-        [ -z "$(tail -c 1 "$BUILD_DIR/$FEEDS_CONF")" ] || echo "" >>"$BUILD_DIR/$FEEDS_CONF"
-        echo 'src-git luci_app_bandix https://github.com/timsaya/luci-app-bandix.git;main' >>"$BUILD_DIR/$FEEDS_CONF"
-    fi
-
     if [ ! -f "$BUILD_DIR/include/bpf.mk" ]; then
         touch "$BUILD_DIR/include/bpf.mk"
     fi
 
     # 选择性更新 feeds，避免扫描有问题的第三方源的所有包
-    # 问题：kenzok 和 bandix 源中部分包的 Makefile 格式有问题
+    # 问题：kenzok 源中部分包的 Makefile 格式有问题
     # 解决：只更新官方源和已知正常的自定义源，第三方源单独处理
     
     # 更新官方 feeds（这些源的 Makefile 格式正常）
@@ -272,7 +262,7 @@ update_feeds() {
     
     # 对于有问题的第三方源，只克隆但不扫描所有包
     # 后续在 install_feeds 中选择性安装需要的包
-    for feed in kenzok openwrt_bandix luci_app_bandix; do
+    for feed in kenzok; do
         if [ ! -d "$BUILD_DIR/feeds/$feed" ]; then
             echo "克隆 $feed 源（跳过 Makefile 扫描）..."
             # 手动克隆，不通过 feeds update
@@ -280,10 +270,6 @@ update_feeds() {
             case "$feed" in
                 kenzok)
                     git clone --depth 1 https://github.com/kenzok8/openwrt-packages.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
-                openwrt_bandix)
-                    git clone --depth 1 https://github.com/timsaya/openwrt-bandix.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
-                luci_app_bandix)
-                    git clone --depth 1 https://github.com/timsaya/luci-app-bandix.git "$BUILD_DIR/feeds/$feed" 2>/dev/null || true ;;
             esac
         fi
     done
@@ -324,26 +310,6 @@ install_feeds() {
                 echo "已复制: $pkg"
             fi
         done
-    fi
-    
-    # bandix 源：复制需要的包
-    # 注意：仓库目录名是 openwrt-bandix，但包目录名也是 openwrt-bandix
-    if [ -d "$BUILD_DIR/feeds/openwrt_bandix" ]; then
-        echo "手动安装 openwrt_bandix 源..."
-        # 修复：包目录名是 openwrt-bandix，不是 bandix
-        for pkg in openwrt-bandix bandix; do
-            if [ -d "$BUILD_DIR/feeds/openwrt_bandix/$pkg" ]; then
-                cp -r "$BUILD_DIR/feeds/openwrt_bandix/$pkg" "$BUILD_DIR/package/" 2>/dev/null || true
-                echo "已复制: $pkg"
-            fi
-        done
-    fi
-    
-    if [ -d "$BUILD_DIR/feeds/luci_app_bandix" ]; then
-        echo "手动安装 luci_app_bandix 源..."
-        if [ -d "$BUILD_DIR/feeds/luci_app_bandix/luci-app-bandix" ]; then
-            cp -r "$BUILD_DIR/feeds/luci_app_bandix/luci-app-bandix" "$BUILD_DIR/package/" 2>/dev/null || true
-        fi
     fi
     
     cd - > /dev/null
