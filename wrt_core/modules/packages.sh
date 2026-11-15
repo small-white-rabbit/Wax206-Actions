@@ -624,6 +624,12 @@ update_vantage() {
     mv "$tmp_dir/luci-app-vantage" "$BUILD_DIR/package/luci-app-vantage"
     rm -rf "$tmp_dir"
 
+    # kenzok8 feeds 也收录了同名包，feeds install 生成的 package/feeds/*/luci-*-vantage
+    # 会与上面的源码树同名冲突并可能覆盖它，导致编译用的是 feed 里的原版、补丁失效。
+    # 清掉 feeds 副本，确保编译使用上面的补丁源码。
+    rm -rf "$BUILD_DIR"/package/feeds/*/luci-app-vantage
+    rm -rf "$BUILD_DIR"/package/feeds/*/luci-theme-vantage
+
     echo "luci-theme-vantage / luci-app-vantage 添加完成（package/）"
 }
 
