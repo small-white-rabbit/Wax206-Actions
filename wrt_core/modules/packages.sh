@@ -588,6 +588,8 @@ update_carbon() {
 
 update_vantage() {
     local repo_url="https://github.com/anothaDev/luci-theme-vantage.git"
+    local patch_file="$BASE_PATH/patches/vantage-wireless-uplink.patch"
+    local model_js="luci-app-vantage/htdocs/luci-static/resources/vantage/model.js"
     local tmp_dir
     tmp_dir=$(mktemp -d)
 
@@ -596,6 +598,24 @@ update_vantage() {
         echo "错误：从 $repo_url 克隆 Vantage 主题仓库失败" >&2
         rm -rf "$tmp_dir"
         exit 1
+    fi
+
+    # 无线 Mesh 子机的上联识别修复：上游未修复时打补丁，已修复则跳过；
+    # 两者都不成立就中止，避免静默出一个丢失修复的固件。
+    if [ ! -f "$patch_file" ]; then
+        echo "错误：缺少 Vantage 无线上联补丁 $patch_file" >&2
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+    if grep -q "members.indexOf(via) >= 0" "$tmp_dir/$model_js"; then
+        echo "Vantage 上游已包含无线 Mesh 上联修复，跳过补丁"
+    elif ! git -C "$tmp_dir" apply --check "$patch_file"; then
+        echo "错误：Vantage 补丁无法应用，上游代码已变更，请复核 $patch_file" >&2
+        rm -rf "$tmp_dir"
+        exit 1
+    else
+        git -C "$tmp_dir" apply "$patch_file"
+        echo "Vantage 无线 Mesh 上联修复补丁已应用"
     fi
 
     rm -rf "$BUILD_DIR/package/luci-theme-vantage" "$BUILD_DIR/package/luci-app-vantage"

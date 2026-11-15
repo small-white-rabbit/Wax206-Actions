@@ -1,0 +1,56 @@
+diff --git a/luci-app-vantage/htdocs/luci-static/resources/vantage/model.js b/luci-app-vantage/htdocs/luci-static/resources/vantage/model.js
+index 3c9d78d..ad3eb50 100644
+--- a/luci-app-vantage/htdocs/luci-static/resources/vantage/model.js
++++ b/luci-app-vantage/htdocs/luci-static/resources/vantage/model.js
+@@ -453,7 +453,9 @@ return baseclass.extend({
+ 			var wired = members.filter(function(m) { return !self.isWireless(m, devs[m], wirelessNames); });
+ 			var eth = wired.filter(function(m) { return devs[m] && devs[m].devtype === 'ethernet'; });
+ 			var lit = function(m) { return devs[m] && devs[m].carrier === true; };
+-			var known = typeof via === 'string' && wired.indexOf(via) >= 0 ? via : null;
++			/* a wireless member (802.11s mesh, a Wi-Fi uplink) is a real
++			   way out as well: let `via` name it too */
++			var known = typeof via === 'string' && members.indexOf(via) >= 0 ? via : null;
+ 			if (!known && own && wired.length > 1) port = null;
+ 			else {
+ 				var next = known || eth.filter(lit)[0] || wired.filter(lit)[0] || eth[0] || wired[0] || members[0];
+@@ -752,9 +754,24 @@ return baseclass.extend({
+ 			return found;
+ 		}
+ 		var gwMac = uplink ? macOf(uplink.gateway) : null;
+-		if (uplink && gwMac && fdb[gwMac] && uplink.port !== fdb[gwMac].port) {
+-			var via = this.resolveUplink(raw.ifaces, devs, wlNames, fdb[gwMac].port, kernel);
+-			if (via && via.port === fdb[gwMac].port) uplink = via;
++		/* the gateway can be reached over a wireless member (an 802.11s
++		   mesh or a Wi-Fi uplink): that port was filtered out of `fdb`
++		   above as a station, so look it up in the raw table and let the
++		   line follow the bridge member the gateway is really on */
++		var gwPort = gwMac && fdb[gwMac] ? fdb[gwMac].port : null;
++		if (gwMac && !gwPort) {
++			var gwSeen = null;
++			arr(raw.fdb).forEach(function(h) {
++				if (!h || names.normMac(h.mac) !== gwMac || typeof h.port !== 'string') return;
++				var seen = finite(h.seen) && h.seen >= 0 ? h.seen : null;
++				if (gwPort != null && (seen == null || (gwSeen != null && gwSeen <= seen))) return;
++				gwPort = h.port;
++				gwSeen = seen;
++			});
++		}
++		if (uplink && gwPort && uplink.port !== gwPort) {
++			var via = this.resolveUplink(raw.ifaces, devs, wlNames, gwPort, kernel);
++			if (via && via.port === gwPort) uplink = via;
+ 		}
+ 		var uplinks = uplink ? ownConduits([ uplink ].concat(this.extraUplinks(raw.ifaces, devs, wlNames, uplink, function(hop) {
+ 			var mac = macOf(hop);
+diff --git a/luci-app-vantage/htdocs/luci-static/resources/view/vantage/overview.js b/luci-app-vantage/htdocs/luci-static/resources/view/vantage/overview.js
+index 124f59e..08e6fec 100644
+--- a/luci-app-vantage/htdocs/luci-static/resources/view/vantage/overview.js
++++ b/luci-app-vantage/htdocs/luci-static/resources/view/vantage/overview.js
+@@ -2467,7 +2467,7 @@ return view.extend({
+ 		var gwName = gwHost && /^(alias|dhcp|mdns|dns)$/.test(gwHost.nameSource) ? gwHost.name : null;
+ 		txt(h.gwKicker, h.lines.length && up ? up.iface : up && up.isWan ? _('Internet') : _('Gateway'));
+ 		txt(h.gwTitle, gwName || (up && up.gateway ? up.gateway : up && up.defaultRoute ? up.l3dev : _('No default route', 'vantage')));
+-		txt(h.gwSub, gwName ? up.gateway : up && up.dns.length ? _('DNS %s').format(up.dns[0]) : _('Reachability not probed'));
++		txt(h.gwSub, gwName ? up.gateway : up && up.dns.length ? _('DNS %s').format(up.dns[0]) : up && up.gateway ? up.dev : _('Reachability not probed'));
+ 
+ 		txt(h.dnVal, upR ? fmt.bitsParts(upR.rx).v : fmt.DASH);
+ 		txt(h.dnUnit, upR ? fmt.bitsParts(upR.rx).u : '');
