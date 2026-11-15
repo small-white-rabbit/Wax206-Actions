@@ -150,18 +150,42 @@ remove_uhttpd_dependency
 cd "$BASE_PATH/../$BUILD_DIR"
 make defconfig
 
-# 校验主题包是否真的进了 .config；feeds install 静默失败时 make defconfig 会把 CONFIG_PACKAGE_*=y 丢掉，
-# 这里显式拦截，避免出一个"没有主题"的固件还以为成功了。
-THEME_CHECK_PKGS="luci-theme-carbon luci-theme-vantage luci-app-vantage"
-for _pkg in $THEME_CHECK_PKGS; do
-    if ! grep -qE "^CONFIG_PACKAGE_${_pkg}=y$" .config; then
-        echo "错误：主题包 ${_pkg} 未进入 .config，feeds/package 接入失败，中止编译。" >&2
-        echo "当前 .config 中相关行：" >&2
-        grep -E "CONFIG_PACKAGE_(luci-theme|luci-app)-(carbon|vantage)" .config >&2 || true
-        exit 1
+# 校验 deconfig 请求的包是否真的进了 .config；feeds install 静默失败时 make defconfig 会把
+# CONFIG_PACKAGE_*=y 丢掉。这里以「当前版本自己的 deconfig」为准，不能硬编码包名：各版本请求的包
+# 并不相同（例如 32M 原版与扩容版启用项不同），硬编码会让未请求该包的版本误报并中止编译。
+# 关键包丢失直接中止；其余被丢弃的包只告警，可能是目标平台不支持的符号。
+CRITICAL_PKGS="luci-theme-carbon luci-theme-vantage luci-app-vantage luci-app-devicemaster"
+DROPPED_CRITICAL=""
+DROPPED_OTHER=""
+REQUESTED_PKGS=$(sed -n 's/^CONFIG_PACKAGE_\([A-Za-z0-9_.+-]*\)=y$/\1/p' "$CONFIG_FILE" | sort -u)
+
+while read -r _pkg; do
+    [ -n "$_pkg" ] || continue
+    if grep -qE "^CONFIG_PACKAGE_${_pkg}=[ym]$" .config; then
+        continue
     fi
-done
-echo "主题包校验通过：Carbon / Vantage 均已进入 .config"
+    if printf '%s\n' $CRITICAL_PKGS | grep -qx "$_pkg"; then
+        DROPPED_CRITICAL="$DROPPED_CRITICAL $_pkg"
+    else
+        DROPPED_OTHER="$DROPPED_OTHER $_pkg"
+    fi
+done <<< "$REQUESTED_PKGS"
+
+if [ -n "$DROPPED_CRITICAL" ]; then
+    echo "错误：以下关键包在 $Dev 的 deconfig 中启用，但未进入 .config，feeds/package 接入失败，中止编译：" >&2
+    printf '  - %s\n' $DROPPED_CRITICAL >&2
+    echo "当前 .config 中相关行：" >&2
+    for _pkg in $DROPPED_CRITICAL; do
+        grep -E "CONFIG_PACKAGE_${_pkg}=" .config >&2 || echo "  (符号不存在：CONFIG_PACKAGE_${_pkg})" >&2
+    done
+    exit 1
+fi
+
+if [ -n "$DROPPED_OTHER" ]; then
+    echo "警告：以下包在 $Dev 的 deconfig 中启用，但 make defconfig 后未保留（可能依赖不满足或符号不存在）："
+    printf '  - %s\n' $DROPPED_OTHER
+fi
+echo "包校验通过：$Dev 请求的关键包均已进入 .config"
 
 if grep -qE "^CONFIG_TARGET_x86_64=y" "$CONFIG_FILE"; then
     DISTFEEDS_PATH="$BASE_PATH/../$BUILD_DIR/package/emortal/default-settings/files/99-distfeeds.conf"
