@@ -587,50 +587,48 @@ update_carbon() {
 }
 
 update_vantage() {
-    local repo_url="https://github.com/anothaDev/luci-theme-vantage.git"
     local patch_file="$BASE_PATH/patches/vantage-wireless-uplink.patch"
-    local model_js="luci-app-vantage/htdocs/luci-static/resources/vantage/model.js"
-    local tmp_dir
-    tmp_dir=$(mktemp -d)
+    local feed_root=""
+    local model_js=""
+    local d
 
-    echo "正在添加 Vantage 主题与仪表盘到 package/..."
-    if ! git_retry clone --depth 1 "$repo_url" "$tmp_dir"; then
-        echo "错误：从 $repo_url 克隆 Vantage 主题仓库失败" >&2
-        rm -rf "$tmp_dir"
-        exit 1
-    fi
-
-    # 无线 Mesh 子机的上联识别修复：上游未修复时打补丁，已修复则跳过；
-    # 两者都不成立就中止，避免静默出一个丢失修复的固件。
+    # 直接使用 feeds 中已收录的 luci-app-vantage / luci-theme-vantage，
+    # 只对 feed 源码打上无线 Mesh 上联识别补丁，避免再维护一份重复的源码树。
     if [ ! -f "$patch_file" ]; then
         echo "错误：缺少 Vantage 无线上联补丁 $patch_file" >&2
-        rm -rf "$tmp_dir"
         exit 1
     fi
-    if grep -q "members.indexOf(via) >= 0" "$tmp_dir/$model_js"; then
-        echo "Vantage 上游已包含无线 Mesh 上联修复，跳过补丁"
-    elif ! git -C "$tmp_dir" apply --check "$patch_file"; then
-        echo "错误：Vantage 补丁无法应用，上游代码已变更，请复核 $patch_file" >&2
-        rm -rf "$tmp_dir"
+
+    # 优先使用 kenzok 源中的 Vantage，其余源仅作兜底
+    for d in "$BUILD_DIR"/feeds/kenzok/luci-app-vantage "$BUILD_DIR"/feeds/*/luci-app-vantage; do
+        [ -d "$d" ] || continue
+        feed_root=${d%/luci-app-vantage}
+        break
+    done
+
+    if [ -z "$feed_root" ]; then
+        echo "错误：feeds 中未找到 luci-app-vantage，无法应用无线 Mesh 上联修复" >&2
         exit 1
-    else
-        git -C "$tmp_dir" apply "$patch_file"
-        echo "Vantage 无线 Mesh 上联修复补丁已应用"
     fi
 
-    rm -rf "$BUILD_DIR/package/luci-theme-vantage" "$BUILD_DIR/package/luci-app-vantage"
-    rm -rf "$tmp_dir/.git"
-    mv "$tmp_dir/luci-theme-vantage" "$BUILD_DIR/package/luci-theme-vantage"
-    mv "$tmp_dir/luci-app-vantage" "$BUILD_DIR/package/luci-app-vantage"
-    rm -rf "$tmp_dir"
+    model_js="$feed_root/luci-app-vantage/htdocs/luci-static/resources/vantage/model.js"
+    if [ ! -f "$model_js" ]; then
+        echo "错误：未找到 $model_js，feeds 中 luci-app-vantage 结构异常" >&2
+        exit 1
+    fi
 
-    # kenzok8 feeds 也收录了同名包，feeds install 生成的 package/feeds/*/luci-*-vantage
-    # 会与上面的源码树同名冲突并可能覆盖它，导致编译用的是 feed 里的原版、补丁失效。
-    # 清掉 feeds 副本，确保编译使用上面的补丁源码。
-    rm -rf "$BUILD_DIR"/package/feeds/*/luci-app-vantage
-    rm -rf "$BUILD_DIR"/package/feeds/*/luci-theme-vantage
+    # 上游未修复时打补丁，已修复则跳过；两者都不成立就中止，
+    # 避免静默出一个丢失修复的固件。
+    if grep -q "members.indexOf(via) >= 0" "$model_js"; then
+        echo "Vantage 已包含无线 Mesh 上联修复，跳过补丁"
+        return
+    fi
+    if ! patch -p1 -d "$feed_root" --fuzz=3 --no-backup-if-mismatch < "$patch_file"; then
+        echo "错误：Vantage 补丁无法应用，feeds 源码已变更，请复核 $patch_file" >&2
+        exit 1
+    fi
 
-    echo "luci-theme-vantage / luci-app-vantage 添加完成（package/）"
+    echo "Vantage 无线 Mesh 上联修复补丁已应用（$feed_root）"
 }
 
 remove_attendedsysupgrade() {
