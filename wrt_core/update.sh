@@ -84,6 +84,7 @@ main() {
     update_uwsgi_limit_as
     update_argon
     update_carbon
+    update_vantage
     update_nginx_ubus_module
     check_default_settings
     install_opkg_distfeeds

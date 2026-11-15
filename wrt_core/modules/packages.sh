@@ -572,9 +572,10 @@ update_argon() {
 
 update_carbon() {
     local repo_url="https://github.com/mrjoechen/luci-theme-carbon.git"
-    local dst_theme_path="$BUILD_DIR/feeds/luci/themes/luci-theme-carbon"
+    # 直接放入 package/ 树，不依赖 feeds install（失败时静默返回 0，set -e 抓不到）
+    local dst_theme_path="$BUILD_DIR/package/luci-theme-carbon"
 
-    echo "正在添加 Carbon 主题..."
+    echo "正在添加 Carbon 主题到 package/..."
     rm -rf "$dst_theme_path"
     if ! git_retry clone --depth 1 "$repo_url" "$dst_theme_path"; then
         echo "错误：从 $repo_url 克隆 Carbon 主题仓库失败" >&2
@@ -582,7 +583,28 @@ update_carbon() {
     fi
     rm -rf "$dst_theme_path/.git"
 
-    echo "luci-theme-carbon 添加完成"
+    echo "luci-theme-carbon 添加完成（package/luci-theme-carbon）"
+}
+
+update_vantage() {
+    local repo_url="https://github.com/anothaDev/luci-theme-vantage.git"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+
+    echo "正在添加 Vantage 主题与仪表盘到 package/..."
+    if ! git_retry clone --depth 1 "$repo_url" "$tmp_dir"; then
+        echo "错误：从 $repo_url 克隆 Vantage 主题仓库失败" >&2
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+
+    rm -rf "$BUILD_DIR/package/luci-theme-vantage" "$BUILD_DIR/package/luci-app-vantage"
+    rm -rf "$tmp_dir/.git"
+    mv "$tmp_dir/luci-theme-vantage" "$BUILD_DIR/package/luci-theme-vantage"
+    mv "$tmp_dir/luci-app-vantage" "$BUILD_DIR/package/luci-app-vantage"
+    rm -rf "$tmp_dir"
+
+    echo "luci-theme-vantage / luci-app-vantage 添加完成（package/）"
 }
 
 remove_attendedsysupgrade() {

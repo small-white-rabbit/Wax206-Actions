@@ -150,6 +150,19 @@ remove_uhttpd_dependency
 cd "$BASE_PATH/../$BUILD_DIR"
 make defconfig
 
+# 校验主题包是否真的进了 .config；feeds install 静默失败时 make defconfig 会把 CONFIG_PACKAGE_*=y 丢掉，
+# 这里显式拦截，避免出一个"没有主题"的固件还以为成功了。
+THEME_CHECK_PKGS="luci-theme-carbon luci-theme-vantage luci-app-vantage"
+for _pkg in $THEME_CHECK_PKGS; do
+    if ! grep -qE "^CONFIG_PACKAGE_${_pkg}=y$" .config; then
+        echo "错误：主题包 ${_pkg} 未进入 .config，feeds/package 接入失败，中止编译。" >&2
+        echo "当前 .config 中相关行：" >&2
+        grep -E "CONFIG_PACKAGE_(luci-theme|luci-app)-(carbon|vantage)" .config >&2 || true
+        exit 1
+    fi
+done
+echo "主题包校验通过：Carbon / Vantage 均已进入 .config"
+
 if grep -qE "^CONFIG_TARGET_x86_64=y" "$CONFIG_FILE"; then
     DISTFEEDS_PATH="$BASE_PATH/../$BUILD_DIR/package/emortal/default-settings/files/99-distfeeds.conf"
     if [ -d "${DISTFEEDS_PATH%/*}" ] && [ -f "$DISTFEEDS_PATH" ]; then
