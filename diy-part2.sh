@@ -51,16 +51,23 @@ fi
 # LuCI 已用内存采用 MemAvailable 口径，避免把可回收缓存算作占用
 MEMORY_VIEW="feeds/luci/modules/luci-mod-status/htdocs/luci-static/resources/view/status/include/20_memory.js"
 if [ -f "$MEMORY_VIEW" ]; then
-    if ! grep -qF '(mem.total&&mem.available!=null)?(mem.total-mem.available):null' "$MEMORY_VIEW"; then
-        if grep -qF '(mem.total&&mem.free)?(mem.total-mem.free):null' "$MEMORY_VIEW"; then
-            sed -i 's/(mem.total&&mem.free)?(mem.total-mem.free):null/(mem.total\&\&mem.available!=null)?(mem.total-mem.available):null/' "$MEMORY_VIEW"
-        else
-            echo "错误：LuCI 内存页面结构已变化，无法安全修正内存口径" >&2
-            exit 1
-        fi
+    if grep -qF '(mem.total&&mem.available!=null)?(mem.total-mem.available):null' "$MEMORY_VIEW"; then
+        # 已是 MemAvailable 口径（之前已修正）
+        echo "✓ LuCI 已用内存已是 MemAvailable 口径（无需修改）"
+    elif grep -qF '(mem.total&&mem.free)?(mem.total-mem.free):null' "$MEMORY_VIEW"; then
+        # 旧写法：total - free → 改成 total - available
+        sed -i 's/(mem.total&&mem.free)?(mem.total-mem.free):null/(mem.total\&\&mem.available!=null)?(mem.total-mem.available):null/' "$MEMORY_VIEW"
+        grep -qF '(mem.total&&mem.available!=null)?(mem.total-mem.available):null' "$MEMORY_VIEW" || exit 1
+        echo "✓ LuCI 已用内存已改为 MemAvailable 口径"
+    elif grep -qE 'mem\.available' "$MEMORY_VIEW"; then
+        # 上游新版 20_memory.js 已直接使用 mem.available（"Used"=total-free，"Total Available"=available），
+        # 无需再做替换；为保持口径一致，把 Used 也改为 total - available。
+        sed -i -E 's/\(mem\.total && mem\.free\) \? \(mem\.total - mem\.free\) : null/(mem.total \&\& mem.available!=null) ? (mem.total - mem.available) : null/' "$MEMORY_VIEW"
+        echo "✓ LuCI 已用内存已对齐 MemAvailable 口径（上游新版结构）"
+    else
+        echo "错误：LuCI 内存页面结构已变化，无法安全修正内存口径" >&2
+        exit 1
     fi
-    grep -qF '(mem.total&&mem.available!=null)?(mem.total-mem.available):null' "$MEMORY_VIEW" || exit 1
-    echo "✓ LuCI 已用内存已改为 MemAvailable 口径"
 else
     echo "错误：未找到 LuCI 内存页面 $MEMORY_VIEW" >&2
     exit 1
