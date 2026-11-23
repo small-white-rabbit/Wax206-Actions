@@ -4,7 +4,6 @@
 # 首次启动时执行一次；实测依据与回退见《WAX206-转发加速优化记录.md》
 # 注意：flow_offloading_hw 在本机的作用是让 fw4 展开物理口 devices 以启用软件快路径，
 #       并非启用 PPE 硬件转发（实测 PPE BND=0）。升级内核后须按优化记录第 5 节监控表复核。
-# packet_steering 与实机已验证状态一致；START=25 先分发 RPS，S99 forward-affinity 再覆盖为 CPU1。
 
 [ -f /etc/config/firewall ] || exit 0
 uci -q get 'firewall.@defaults[0]' >/dev/null 2>&1 || exit 0
@@ -13,8 +12,6 @@ uci -q batch <<'EOF'
 set firewall.@defaults[0].flow_offloading=1
 set firewall.@defaults[0].flow_offloading_hw=1
 commit firewall
-set network.globals.packet_steering=1
-commit network
 EOF
 
 [ -x /etc/init.d/forward-affinity ] && /etc/init.d/forward-affinity enable
