@@ -76,5 +76,6 @@ define Device/netgear_wax206
   IMAGE/factory.img := append-kernel | pad-to $$(KERNEL_SIZE) | \
 	append-ubi | check-size | netgear-encrypted-factory
   IMAGE/sysupgrade.bin := sysupgrade-tar | append-metadata
+  SUPPORTED_DEVICES := netgear,wax206
 endef
 TARGET_DEVICES += netgear_wax206

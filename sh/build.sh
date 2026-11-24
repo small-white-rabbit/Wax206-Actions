@@ -230,6 +230,43 @@ FIRMWARE_DIR="$BASE_PATH/../firmware"
 \rm -rf "$FIRMWARE_DIR"
 mkdir -p "$FIRMWARE_DIR"
 
+# ===== 固件 metadata 校验 =====
+# OpenWrt sysupgrade.bin 必须包含 fwtool 写入的 metadata，否则刷机时报
+# "Image metadata not present"。这里在复制前逐一校验，缺 metadata 直接中止。
+FWTOOL="$BASE_PATH/../$BUILD_DIR/staging_dir/host/bin/fwtool"
+if [ ! -x "$FWTOOL" ]; then
+    echo "警告: fwtool 未找到 ($FWTOOL)，跳过 metadata 校验"
+else
+    echo "=== 固件 metadata 校验 ==="
+    FAILED=0
+    while IFS= read -r fwimg; do
+        [ -z "$fwimg" ] && continue
+        # sysupgrade.bin / recovery.itb 都是刷写目标，必须有 metadata
+        case "$fwimg" in
+            *sysupgrade.bin|*recovery.itb)
+                if ! "$FWTOOL" -t "$fwimg" > /dev/null 2>&1; then
+                    echo "错误: $(basename "$fwimg") 缺少 metadata！"
+                    echo "fwtool 输出:"
+                    "$FWTOOL" -t "$fwimg" 2>&1 || true
+                    FAILED=1
+                else
+                    echo "  ✓ $(basename "$fwimg") — metadata OK"
+                fi
+                ;;
+        esac
+    done < <(find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.itb" \) 2>/dev/null)
+
+    if [ "$FAILED" -ne 0 ]; then
+        echo ""
+        echo "========================================"
+        echo "固件 metadata 校验失败，中止发布！"
+        echo "原因: mt7622.mk 中的 Device 定义必须设置 SUPPORTED_DEVICES"
+        echo "========================================"
+        exit 1
+    fi
+    echo "所有刷机目标固件均包含 metadata ✓"
+fi
+
 # 复制固件和 manifest 文件
 find "$TARGET_DIR" -type f \( -name "*.bin"  -o -name "*.itb" -o -name "*.manifest" \) -exec cp -f {} "$FIRMWARE_DIR/" \;
 
