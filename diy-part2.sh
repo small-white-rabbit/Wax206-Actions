@@ -148,7 +148,8 @@ echo "✓ /etc/sysctl.d/99-conntrack.conf 已写入"
 cat > package/base-files/files/etc/sysctl.d/99-network.conf << 'EOF'
 net.core.netdev_max_backlog=4096
 net.core.netdev_budget=50000
-net.ipv4.tcp_congestion_control=cubic
+net.core.default_qdisc=fq
+net.ipv4.tcp_congestion_control=bbr
 net.ipv4.ip_local_port_range=1024 65535
 net.ipv4.tcp_slow_start_after_idle=0
 EOF
@@ -176,6 +177,8 @@ cat > package/base-files/files/etc/hotplug.d/iface/99-conntrack << 'HOTPLUG'
     echo 5 > /proc/sys/net/netfilter/nf_conntrack_icmp_timeout
     echo 0 > /proc/sys/net/netfilter/nf_conntrack_log_invalid
     echo 1 > /proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal
+    # 上行抗 bufferbloat：WAN egress Cake（上行 50M，按 45M 整形留余量）
+    command -v tc >/dev/null 2>&1 && tc qdisc replace dev wan root cake bandwidth 45mbit diffserv4 ack-filter-aggressive 2>/dev/null
 }
 HOTPLUG
 chmod +x package/base-files/files/etc/hotplug.d/iface/99-conntrack
@@ -219,6 +222,79 @@ exit 0
 EOF
 chmod +x package/base-files/files/etc/uci-defaults/99-mem-trim
 echo "✓ /etc/uci-defaults/99-mem-trim 已写入（ttyd 默认不自启）"
+
+# ==========================================
+# 无线 / 漫游 / DNS 基线固化（2026-11-24）
+# ==========================================
+# 1) 关闭 802.11r（FT 在本 Mesh 组合下引发 key addition failed），保留 11k/11v
+# 2) isolate=0，允许同 AP 无线设备互访（投屏/无线打印）
+# 3) usteer 统一温和参数，避免 2.4G/5G 反复震荡
+# 4) 局域网不宣告 IPv6 RA（与 OpenClash fake-ip 架构一致）
+# 5) WAN 设备 MTU 1500（DHCP 场景）
+# 6) 清理无效 SQM eth1 示例
+# 7) OpenClash 启用自定义 fallback-filter
+cat > package/base-files/files/etc/uci-defaults/98-net-tune << 'EOF'
+#!/bin/sh
+[ -f /etc/config/wireless ] || wifi config 2>/dev/null
+for s in $(uci -q show wireless | sed -n 's/^wireless\.\([^.=]*\)=wifi-iface$/\1/p'); do
+    uci -q set wireless.$s.ieee80211r='0'
+    uci -q set wireless.$s.ieee80211k='1'
+    uci -q set wireless.$s.bss_transition='1'
+    uci -q set wireless.$s.isolate='0'
+done
+uci -q commit wireless
+
+if [ -f /etc/config/usteer ] && uci -q get usteer.@usteer[0] >/dev/null 2>&1; then
+    uci -q set usteer.@usteer[0].aggressiveness='2'
+    uci -q set usteer.@usteer[0].band_steering_interval='60000'
+    uci -q set usteer.@usteer[0].band_steering_min_snr='-70'
+    uci -q set usteer.@usteer[0].signal_diff_threshold='5'
+    uci -q set usteer.@usteer[0].roam_trigger_snr='-75'
+    uci -q set usteer.@usteer[0].roam_trigger_interval='60000'
+    uci -q commit usteer
+fi
+
+if uci -q get dhcp.lan >/dev/null 2>&1; then
+    uci -q set dhcp.lan.ra='disabled'
+    uci -q set dhcp.lan.dhcpv6='disabled'
+    uci -q commit dhcp
+fi
+
+if uci -q get network.@device[1] >/dev/null 2>&1; then
+    uci -q set network.@device[1].mtu='1500'
+    uci -q commit network
+fi
+
+if [ -f /etc/config/sqm ]; then
+    uci -q delete sqm.eth1 2>/dev/null
+    uci -q commit sqm
+fi
+
+if [ -f /etc/config/openclash ]; then
+    uci -q set openclash.config.custom_fallback_filter='1'
+    uci -q commit openclash
+fi
+exit 0
+EOF
+chmod +x package/base-files/files/etc/uci-defaults/98-net-tune
+echo "✓ /etc/uci-defaults/98-net-tune 已写入（无线/漫游/IPv6/MTU/DNS 基线）"
+
+# OpenClash 自定义 fallback-filter 文件（非敏感，纯 fallback 判定规则）
+mkdir -p package/base-files/files/etc/openclash/custom
+cat > package/base-files/files/etc/openclash/custom/openclash_custom_fallback_filter.yaml << 'EOF'
+fallback-filter:
+  geoip: true
+  geoip-code: CN
+  ipcidr:
+    - 240.0.0.0/4
+    - 127.0.0.1/8
+  domain:
+    - '+.google.com'
+    - '+.facebook.com'
+    - '+.youtube.com'
+    - '+.xn--ngstr-lra8j.com'
+EOF
+echo "✓ /etc/openclash/custom/openclash_custom_fallback_filter.yaml 已写入"
 
 echo "=========================================="
 echo "DIY 配置完成！"
