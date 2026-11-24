@@ -273,15 +273,8 @@ fi
 if [ -f /etc/config/openclash ]; then
     uci -q set openclash.config.custom_fallback_filter='1'
     uci -q commit openclash
-fi
-exit 0
-EOF
-chmod +x package/base-files/files/etc/uci-defaults/98-net-tune
-echo "✓ /etc/uci-defaults/98-net-tune 已写入（无线/漫游/IPv6/MTU/DNS 基线）"
-
-# OpenClash 自定义 fallback-filter 文件（非敏感，纯 fallback 判定规则）
-mkdir -p package/base-files/files/etc/openclash/custom
-cat > package/base-files/files/etc/openclash/custom/openclash_custom_fallback_filter.yaml << 'EOF'
+    mkdir -p /etc/openclash/custom
+    cat > /etc/openclash/custom/openclash_custom_fallback_filter.yaml << 'YAML'
 fallback-filter:
   geoip: true
   geoip-code: CN
@@ -293,8 +286,16 @@ fallback-filter:
     - '+.facebook.com'
     - '+.youtube.com'
     - '+.xn--ngstr-lra8j.com'
+YAML
+fi
+exit 0
 EOF
-echo "✓ /etc/openclash/custom/openclash_custom_fallback_filter.yaml 已写入"
+chmod +x package/base-files/files/etc/uci-defaults/98-net-tune
+echo "✓ /etc/uci-defaults/98-net-tune 已写入（无线/漫游/IPv6/MTU/DNS 基线）"
+
+# 注意：OpenClash 的自定义配置不放 base-files。luci-app-openclash 包自带同名文件，
+# 放在 base-files 会导致 package/install 阶段 apk 报 "trying to overwrite" 而失败。
+# 改为在 98-net-tune 的 uci-defaults 里运行期写入。
 
 echo "=========================================="
 echo "DIY 配置完成！"
