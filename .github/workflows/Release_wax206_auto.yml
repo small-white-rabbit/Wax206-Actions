@@ -1,5 +1,5 @@
 name: Release_wax206_选择编译
-run-name: Release - ${{ inputs.model || 'wax206'}}
+run-name: Release - ${{ inputs.model || 'gwax206'}}
 
 on:
   workflow_dispatch:
@@ -15,8 +15,11 @@ on:
           - gwax206     # 扩容 256M
           - gwax206_imm     # 扩容 256M
 
-  #schedule:
-    #- cron: 43 3 * * 4
+  # 每周四 03:43 (UTC) 定时编译一次：GitHub 会删除 7 天未被访问的缓存，
+  # 定时任务保持缓存持续被访问，避免手动编译时退化成冷编译（约 100 分钟）。
+  # 定时触发没有 inputs.model，会走下面各处 `inputs.model || 'gwax206'` 的默认值。
+  schedule:
+    - cron: '43 3 * * 4'
 
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -39,8 +42,25 @@ jobs:
 
       - name: 构建系统设置
         run: |
-          sudo bash -c 'bash <(curl -sL https://build-scripts.immortalwrt.org/init_build_environment.sh)'
-          sudo -E apt -yqq install dos2unix libfuse-dev ccache  # 新增: 安装 ccache
+          # 上游脚本会 apt full-upgrade 并从 llvm.org / nodesource / launchpad / keyserver
+          # 等外部源装包，且内部 curl 没有超时。网络抖动时曾单次卡住 80 分钟。
+          # 这里给单次执行加 20 分钟上限并重试一次，正常情况 4-6 分钟即可完成。
+          for i in 1 2; do
+            echo "=== 第 $i 次安装构建环境（单次上限 20 分钟）==="
+            if sudo timeout --kill-after=30s 20m bash -c 'bash <(curl -fsSL --max-time 60 https://build-scripts.immortalwrt.org/init_build_environment.sh)'; then
+              echo "构建环境安装完成"
+              break
+            fi
+            echo "::warning::构建环境安装超时或失败（第 $i 次）"
+            sudo dpkg --configure -a || true
+            sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock || true
+            if [ "$i" = "2" ]; then
+              echo "::error::构建环境安装连续两次失败或超时"
+              exit 1
+            fi
+            sleep 20
+          done
+          sudo -E apt -yqq -o Acquire::Retries=3 install dos2unix libfuse-dev ccache  # 新增: 安装 ccache
           sudo -E apt -yqq autoremove --purge
           sudo -E apt -yqq autoclean
           sudo -E apt -yqq clean
@@ -63,8 +83,8 @@ jobs:
           echo "BUILD_DATE=$(date +"%y.%m.%d_%H.%M.%S")" >> $GITHUB_ENV
           
           # 将原本固定的 wax206.ini 替换为变量
-          # 使用 ${{ inputs.model || 'wax206' }} 来获取输入值，如果没有输入则默认为 wax206
-          CONF_FILE="./wrt_core/compilecfg/${{ inputs.model || 'wax206' }}.ini"
+          # 使用 ${{ inputs.model || 'gwax206' }} 来获取输入值，手动触发默认 gwax206，定时触发同样回落到 gwax206
+          CONF_FILE="./wrt_core/compilecfg/${{ inputs.model || 'gwax206' }}.ini"
           
           if [ -f "$CONF_FILE" ]; then
             # 提取 REPO_URL
@@ -76,14 +96,14 @@ jobs:
           fi
 
           # 设置 VARIANT 用于固件重命名
-          case "${{ inputs.model || 'wax206' }}" in
+          case "${{ inputs.model || 'gwax206' }}" in
             fmwax206) echo "VARIANT=70m" >> $GITHUB_ENV ;;
             gwax206|gwax206_imm) echo "VARIANT=256m" >> $GITHUB_ENV ;;
             *) echo "VARIANT=" >> $GITHUB_ENV ;;
           esac
           
       - name: 克隆固件代码
-        run: ./wrt_core/pre_clone_action.sh ${{ inputs.model || 'wax206'}}
+        run: ./wrt_core/pre_clone_action.sh ${{ inputs.model || 'gwax206'}}
         
       - name: 缓存依赖
         uses: actions/cache@v5.0.2
@@ -111,7 +131,7 @@ jobs:
       - name: 构建固件
         run: |
           chmod +x $DIY_my_SH
-          ./sh/build.sh ${{ inputs.model || 'wax206'}}   # ← 修复这里
+          ./sh/build.sh ${{ inputs.model || 'gwax206'}}   # ← 修复这里
 
       - name: 获取内核版本
         run: |
@@ -139,11 +159,17 @@ jobs:
           fi
         continue-on-error: true
           
-      - name: 删除旧缓存
+      - name: 清理旧缓存（保留最近 3 份）
         run: |
-          gh cache list --key ${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}- --json key --jq '.[] | .key' | while read -r key; do
-            gh cache delete "$key"
-          done
+          # GitHub 会删除 7 天未访问的缓存；若每次都把同前缀缓存全删掉，一旦超过 7 天
+          # 没有编译就只能冷编译（约 100 分钟）。这里改为最多保留 3 份，供 restore-keys 回落。
+          KEY_PREFIX="${{ matrix.os }}-${{ hashFiles('**/repo_flag') }}-"
+          gh cache list --key "$KEY_PREFIX" --limit 100 --json key,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[3:] | .[].key' | while read -r key; do
+              [ -n "$key" ] || continue
+              echo "删除旧缓存: $key"
+              gh cache delete "$key" || echo "::warning::删除缓存失败: $key"
+            done
           echo "========cache status========"
           echo "ccache: $(du -sh ./action_build/.ccache | cut -f 1)"
           echo "staging: $(du -sh ./action_build/staging_dir | cut -f 1)"
@@ -187,7 +213,7 @@ jobs:
         run: |
           VARIANT="${{ env.VARIANT }}"
           echo "云编译发布" > release_body.txt
-          echo "型号: ${{ inputs.model || 'wax206' }}${VARIANT:+ ($VARIANT)}" >> release_body.txt
+          echo "型号: ${{ inputs.model || 'gwax206' }}${VARIANT:+ ($VARIANT)}" >> release_body.txt
           echo "源码：${{ env.BUILD_SRC }}" >> release_body.txt
           echo "Kernel: ${{ env.KVER }}" >> release_body.txt
           echo "SSID: Wax206" >> release_body.txt
@@ -206,7 +232,7 @@ jobs:
       - name: 发布固件
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.BUILD_DATE }}_${{ inputs.model || 'wax206'}}
+          tag_name: ${{ env.BUILD_DATE }}_${{ inputs.model || 'gwax206'}}
           files: ./firmware/*.*
           body_path: ./release_body.txt
 
@@ -224,7 +250,7 @@ jobs:
         if: env.UPLOAD_RELEASE == 'true' && !cancelled()
         with:
           keep_latest: 10
-          delete_tag_pattern: ${{ inputs.model || 'wax206'}}
+          delete_tag_pattern: ${{ inputs.model || 'gwax206'}}
           delete_tags: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
