@@ -231,40 +231,38 @@ FIRMWARE_DIR="$BASE_PATH/../firmware"
 mkdir -p "$FIRMWARE_DIR"
 
 # ===== 固件 metadata 校验 =====
-# OpenWrt sysupgrade.bin 必须包含 fwtool 写入的 metadata，否则刷机时报
-# "Image metadata not present"。这里在复制前逐一校验，缺 metadata 直接中止。
+# OpenWrt 的 Build/append-metadata 会把 metadata 追加到镜像尾部，sysupgrade 靠它做设备
+# 兼容性检查；缺失时刷机报 "Image metadata not present"。
+# fwtool 没有“只检查”模式：-t 必须搭配 -s/-i，单独 -t 只会打印 usage 并失败。
+# 正确做法是用 -i <临时文件> 提取一次，再判断提取结果是否非空。
+# 注意 initramfs-recovery.itb 是恢复镜像，上游本身就不写 metadata，不参与校验。
 FWTOOL="$BASE_PATH/../$BUILD_DIR/staging_dir/host/bin/fwtool"
 if [ ! -x "$FWTOOL" ]; then
     echo "警告: fwtool 未找到 ($FWTOOL)，跳过 metadata 校验"
 else
     echo "=== 固件 metadata 校验 ==="
+    META_TMP=$(mktemp)
     FAILED=0
     while IFS= read -r fwimg; do
-        [ -z "$fwimg" ] && continue
-        # sysupgrade.bin / recovery.itb 都是刷写目标，必须有 metadata
-        case "$fwimg" in
-            *sysupgrade.bin|*recovery.itb)
-                if ! "$FWTOOL" -t "$fwimg" > /dev/null 2>&1; then
-                    echo "错误: $(basename "$fwimg") 缺少 metadata！"
-                    echo "fwtool 输出:"
-                    "$FWTOOL" -t "$fwimg" 2>&1 || true
-                    FAILED=1
-                else
-                    echo "  ✓ $(basename "$fwimg") — metadata OK"
-                fi
-                ;;
-        esac
-    done < <(find "$TARGET_DIR" -type f \( -name "*.bin" -o -name "*.itb" \) 2>/dev/null)
+        [ -n "$fwimg" ] || continue
+        : > "$META_TMP"
+        if "$FWTOOL" -i "$META_TMP" "$fwimg" > /dev/null 2>&1 && [ -s "$META_TMP" ]; then
+            echo "  ✓ $(basename "$fwimg") — metadata OK"
+            echo "      $(tr -d '\n' < "$META_TMP" | cut -c1-400)"
+        else
+            echo "错误: $(basename "$fwimg") 缺少 metadata" >&2
+            FAILED=1
+        fi
+    done < <(find "$TARGET_DIR" -type f -name "*sysupgrade.bin" 2>/dev/null)
+    rm -f "$META_TMP"
 
     if [ "$FAILED" -ne 0 ]; then
-        echo ""
-        echo "========================================"
-        echo "固件 metadata 校验失败，中止发布！"
-        echo "原因: mt7622.mk 中的 Device 定义必须设置 SUPPORTED_DEVICES"
-        echo "========================================"
+        echo "========================================" >&2
+        echo "固件 metadata 校验失败，中止发布" >&2
+        echo "========================================" >&2
         exit 1
     fi
-    echo "所有刷机目标固件均包含 metadata ✓"
+    echo "sysupgrade 固件均包含 metadata ✓"
 fi
 
 # 复制固件和 manifest 文件
